@@ -34,13 +34,14 @@ Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 cap1203 cap_sens(&Wire);
 
 volatile unsigned char buff0x1b[3];
-volatile unsigned char buff0x1c[4];
+volatile unsigned char buff0x1c[2];
+volatile unsigned char buff0x20[1];
 
 uint8_t vib0_count;
 uint8_t vib1_count;
 uint8_t vib2_count;
 
-float servo_angle = 0.0;
+uint16_t servo_angle = 0;
 bool servo_enable = false;
 const uint8_t DXL_ID = 1;
 const float DXL_PROTOCOL_VERSION = 2.0;
@@ -67,10 +68,24 @@ void mcpISR(){
   {
     if(servo_enable)
     {
-      memcpy((unsigned char *)buff0x1c, buff, 4);
-      float* tmp = (float*)buff0x1c;
-      servo_angle = *tmp;
-      dxl.setGoalPosition(DXL_ID, servo_angle, UNIT_DEGREE);
+      memcpy((unsigned char *)buff0x1c, buff, 2);
+      servo_angle = ((uint16_t)buff0x1c[1]) << 8 | ((uint16_t)buff0x1c[0]) << 0;
+      dxl.setGoalPosition(DXL_ID, servo_angle);
+    }
+  }
+  if(id == 0x20)
+  {
+    if(servo_enable)
+    {
+      memcpy((unsigned char *)buff0x20, buff, 1);
+      if(buff0x20[0] == 0x00)
+      {
+        dxl.torqueOff(DXL_ID);
+      }
+      if(buff0x20[0] == 0x01)
+      {
+        dxl.torqueOn(DXL_ID);
+      }
     }
   }
 }
@@ -117,7 +132,14 @@ void task20ms(void *pvParameters)
                 | digitalRead(SW_UP)    << 2
                 | digitalRead(SW_DOWN)  << 3;
     data0x13[0] = (~data0x13[0])&0x0f;
-    CAN0.sendMsgBuf(0x13, 0, 1, data0x13);            
+    CAN0.sendMsgBuf(0x13, 0, 1, data0x13);
+    vTaskDelay(1);
+
+    uint16_t angle = dxl.getPresentPosition(DXL_ID);
+    uint8_t data0x1f[2];
+    data0x1f[0] = (angle & 0x00ff) >> 0;
+    data0x1f[1] = (angle & 0xff00) >> 8;
+    CAN0.sendMsgBuf(0x1f, 0, 2, data0x1f);
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -149,7 +171,7 @@ void setup()
   vib1_count = 0;
   vib2_count = 0;
 
-  servo_angle = 0.0;
+  servo_angle = 0;
 
   CAN0.begin(MCP_ANY, CAN_1000KBPS, MCP_20MHZ);
   CAN0.setMode(MCP_NORMAL);
@@ -162,7 +184,7 @@ void setup()
     dxl.torqueOff(DXL_ID);
     dxl.setOperatingMode(DXL_ID, OP_POSITION);
     dxl.torqueOn(DXL_ID);
-    dxl.setGoalPosition(DXL_ID, 0.0, UNIT_DEGREE);
+    dxl.setGoalPosition(DXL_ID, 2048);
   }
 
   lox.begin();
