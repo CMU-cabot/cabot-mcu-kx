@@ -25,11 +25,6 @@
 TaskHandle_t thp[3];
 
 Adafruit_BNO055 bno = Adafruit_BNO055(-1, 0x28, &Wire);
-imu::Vector<3> acc;
-imu::Vector<3> gyro;
-imu::Vector<3> mag;
-imu::Quaternion quat;
-
 Adafruit_BME280 bme(BME_CS);
 
 volatile unsigned char buff0x31[8] = {0};
@@ -42,6 +37,13 @@ volatile bool flag_buff0x33 = false;
 
 adafruit_bno055_offsets_t calib_data;
 
+Adafruit_I2CDevice *i2c = new Adafruit_I2CDevice(0x28, &Wire);
+bool readlen(Adafruit_BNO055::adafruit_bno055_reg_t reg, byte *buffer, uint8_t len)
+{
+  uint8_t reg_buf[1] = {(uint8_t)reg};
+  return i2c->write_then_read(reg_buf, 1, buffer, len);
+}
+
 void task10ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -49,39 +51,43 @@ void task10ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(true)
   {
-    acc  = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
-    gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
-    quat = bno.getQuat();
-  
+    byte acc[6]  = {0};
+    byte gyro[6] = {0};
+    byte quat[8] = {0};
+    
+    readlen(Adafruit_BNO055::BNO055_ACCEL_DATA_X_LSB_ADDR,      acc,  6);
+    readlen(Adafruit_BNO055::BNO055_GYRO_DATA_X_LSB_ADDR,       gyro, 6);
+    readlen(Adafruit_BNO055::BNO055_QUATERNION_DATA_W_LSB_ADDR, quat, 8);
+    
     CAN.beginPacket(0x09);
-    CAN.write((((int16_t)(acc.x()*100)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(acc.x()*100)) & 0xff00)>>8);
-    CAN.write((((int16_t)(acc.y()*100)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(acc.y()*100)) & 0xff00)>>8);
-    CAN.write((((int16_t)(acc.z()*100)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(acc.z()*100)) & 0xff00)>>8);
+    CAN.write(acc[0]);
+    CAN.write(acc[1]);
+    CAN.write(acc[2]);
+    CAN.write(acc[3]);
+    CAN.write(acc[4]);
+    CAN.write(acc[5]);
     CAN.endPacket();
     ets_delay_us(200);
     
     CAN.beginPacket(0x0a);
-    CAN.write((((int16_t)(gyro.x()*16)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(gyro.x()*16)) & 0xff00)>>8);
-    CAN.write((((int16_t)(gyro.y()*16)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(gyro.y()*16)) & 0xff00)>>8);
-    CAN.write((((int16_t)(gyro.z()*16)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(gyro.z()*16)) & 0xff00)>>8);
+    CAN.write(gyro[0]);
+    CAN.write(gyro[1]);
+    CAN.write(gyro[2]);
+    CAN.write(gyro[3]);
+    CAN.write(gyro[4]);
+    CAN.write(gyro[5]);
     CAN.endPacket();
     ets_delay_us(200);
     
     CAN.beginPacket(0x0b);
-    CAN.write((((int16_t)(quat.x()*32767)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(quat.x()*32767)) & 0xff00)>>8);
-    CAN.write((((int16_t)(quat.y()*32767)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(quat.y()*32767)) & 0xff00)>>8);
-    CAN.write((((int16_t)(quat.z()*32767)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(quat.z()*32767)) & 0xff00)>>8);
-    CAN.write((((int16_t)(quat.w()*32767)) & 0x00ff)>>0);
-    CAN.write((((int16_t)(quat.w()*32767)) & 0xff00)>>8);
+    CAN.write(quat[2]);
+    CAN.write(quat[3]);
+    CAN.write(quat[4]);
+    CAN.write(quat[5]);
+    CAN.write(quat[6]);
+    CAN.write(quat[7]);
+    CAN.write(quat[0]);
+    CAN.write(quat[1]);
     CAN.endPacket();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -177,10 +183,10 @@ void setup() {
 
   digitalWrite(BME_RST, HIGH);
   digitalWrite(BNO_RST, LOW);
-  delay(10);
+  delay(100);
   digitalWrite(BME_RST, LOW);
   digitalWrite(BNO_RST, HIGH);
-  delay(10);
+  delay(100);
   
   calib_data = {0};
   Serial.begin(1000000);
@@ -222,6 +228,8 @@ void setup() {
   }
   delay(100);
   bno.setMode(OPERATION_MODE_NDOF);
+  bno.setAxisRemap(Adafruit_BNO055::REMAP_CONFIG_P2);
+  bno.setAxisSign(Adafruit_BNO055::REMAP_SIGN_P2);
 
   xTaskCreatePinnedToCore(task10ms,  "task10ms",  4096, NULL, 10, &thp[0], 1);
   xTaskCreatePinnedToCore(taskWifi,  "taskWifi",  4096, NULL, 5,  &thp[1], 1); 
