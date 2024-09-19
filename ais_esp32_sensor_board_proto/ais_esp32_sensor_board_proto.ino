@@ -23,6 +23,7 @@
 #define SEALEVELPRESSURE_HPA (1013.25)
 
 TaskHandle_t thp[3];
+xSemaphoreHandle xCANSemaphore;
 
 Adafruit_BNO055 bno = Adafruit_BNO055(-1, 0x28, &Wire);
 Adafruit_BME280 bme(BME_CS);
@@ -58,7 +59,8 @@ void task10ms(void *pvParameters)
     readlen(Adafruit_BNO055::BNO055_ACCEL_DATA_X_LSB_ADDR,      acc,  6);
     readlen(Adafruit_BNO055::BNO055_GYRO_DATA_X_LSB_ADDR,       gyro, 6);
     readlen(Adafruit_BNO055::BNO055_QUATERNION_DATA_W_LSB_ADDR, quat, 8);
-    
+
+    xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
     CAN.beginPacket(0x09);
     CAN.write(acc[0]);
     CAN.write(acc[1]);
@@ -68,7 +70,7 @@ void task10ms(void *pvParameters)
     CAN.write(acc[5]);
     CAN.endPacket();
     ets_delay_us(200);
-    
+
     CAN.beginPacket(0x0a);
     CAN.write(gyro[0]);
     CAN.write(gyro[1]);
@@ -78,7 +80,7 @@ void task10ms(void *pvParameters)
     CAN.write(gyro[5]);
     CAN.endPacket();
     ets_delay_us(200);
-    
+
     CAN.beginPacket(0x0b);
     CAN.write(quat[2]);
     CAN.write(quat[3]);
@@ -89,6 +91,8 @@ void task10ms(void *pvParameters)
     CAN.write(quat[0]);
     CAN.write(quat[1]);
     CAN.endPacket();
+    xSemaphoreGive(xCANSemaphore);
+    
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -113,17 +117,21 @@ void taskWifi(void *pvParameters)
           int8_t ch   = WiFi.channel(i);
 
           ssid.toCharArray(data, ssid.length()+1);
+          
           for(int f=0;f<4;f++)
           {
+            xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
             CAN.beginPacket(0x0c+f);
             for(int b=0;b<8;b++)
             {
               CAN.write(data[f*8+b]);
             }
             CAN.endPacket();
+            xSemaphoreGive(xCANSemaphore);
             ets_delay_us(200);
           }  
-      
+
+          xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
           CAN.beginPacket(0x10);
           CAN.write(bssid[0]);
           CAN.write(bssid[1]);
@@ -134,6 +142,7 @@ void taskWifi(void *pvParameters)
           CAN.write(ch);
           CAN.write(rssi);
           CAN.endPacket();
+          xSemaphoreGive(xCANSemaphore);
         }
       }
     }
@@ -151,6 +160,7 @@ void task500ms(void *pvParameters)
     int16_t hum  = (int16_t)(bme.readHumidity()    * 100);
     int32_t pres = (uint32_t)(bme.readPressure()   * 100);
 
+    xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
     CAN.beginPacket(0x11);
     CAN.write((temp & 0x00ff) >> 0);
     CAN.write((temp & 0xff00) >> 8);
@@ -161,16 +171,20 @@ void task500ms(void *pvParameters)
     CAN.write((pres & 0x00ff0000) >> 16);
     CAN.write((pres & 0xff000000) >> 24);    
     CAN.endPacket();
+    xSemaphoreGive(xCANSemaphore);
     ets_delay_us(200);
 
     uint8_t system, gyro, accel, mag;
     bno.getCalibration(&system, &gyro, &accel, &mag);
+    xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
     CAN.beginPacket(0x37);
     CAN.write(system);
     CAN.write(gyro);
     CAN.write(accel);
     CAN.write(mag);
     CAN.endPacket();
+    xSemaphoreGive(xCANSemaphore);
+    
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -231,9 +245,11 @@ void setup() {
   bno.setAxisRemap(Adafruit_BNO055::REMAP_CONFIG_P2);
   bno.setAxisSign(Adafruit_BNO055::REMAP_SIGN_P2);
 
+  xCANSemaphore = xSemaphoreCreateMutex();
+
   xTaskCreatePinnedToCore(task10ms,  "task10ms",  4096, NULL, 10, &thp[0], 1);
   xTaskCreatePinnedToCore(taskWifi,  "taskWifi",  4096, NULL, 5,  &thp[1], 1); 
-  xTaskCreatePinnedToCore(task500ms, "task500ms", 4096, NULL, 5,  &thp[2], 1); 
+  xTaskCreatePinnedToCore(task500ms, "task500ms", 4096, NULL, 3,  &thp[2], 1); 
   
 }
 
@@ -264,7 +280,8 @@ void loop() {
           Serial.println(calib_data.gyro_offset_z);
           Serial.println(calib_data.accel_radius);
           Serial.println(calib_data.mag_radius);
-          
+
+          xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
           CAN.beginPacket(0x34);
           CAN.write(((uint16_t)calib_data.accel_offset_x & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.accel_offset_x & 0xff00)>>8);
@@ -275,8 +292,10 @@ void loop() {
           CAN.write(((uint16_t)calib_data.mag_offset_x   & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.mag_offset_x   & 0xff00)>>8);
           CAN.endPacket();
+          xSemaphoreGive(xCANSemaphore);
           ets_delay_us(200);
 
+          xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
           CAN.beginPacket(0x35);
           CAN.write(((uint16_t)calib_data.mag_offset_y   & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.mag_offset_y   & 0xff00)>>8);
@@ -287,8 +306,10 @@ void loop() {
           CAN.write(((uint16_t)calib_data.gyro_offset_y  & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.gyro_offset_y  & 0xff00)>>8);
           CAN.endPacket();
+          xSemaphoreGive(xCANSemaphore);
           ets_delay_us(200);
 
+          xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
           CAN.beginPacket(0x36);
           CAN.write(((uint16_t)calib_data.gyro_offset_z  & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.gyro_offset_z  & 0xff00)>>8);
@@ -297,6 +318,7 @@ void loop() {
           CAN.write(((uint16_t)calib_data.mag_radius     & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.mag_radius     & 0xff00)>>8);
           CAN.endPacket();
+          xSemaphoreGive(xCANSemaphore);
           ets_delay_us(200);
         }
       
