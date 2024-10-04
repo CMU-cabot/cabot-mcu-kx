@@ -66,42 +66,46 @@ void mcpISR(){
   long unsigned int id;
   unsigned char len = 0;
   unsigned char buff[8];
-
-  CAN0.readMsgBuf(&id, &len, buff);
+    
+  while(CAN0.checkReceive()==CAN_MSGAVAIL)
+  {
+    CAN0.readMsgBuf(&id, &len, buff);
   
-  if((id & 0x80000000) == 0x80000000){return;}
+    if((id & 0x80000000) == 0x80000000){return;}
 
-  if(id == 0x1b)
-  {
-    memcpy((unsigned char *)buff0x1b, buff, 3);
-    vib0_count = (buff0x1b[0]!=0) ? buff0x1b[0] : vib0_count;
-    vib1_count = (buff0x1b[1]!=0) ? buff0x1b[1] : vib1_count;
-    vib2_count = (buff0x1b[2]!=0) ? buff0x1b[2] : vib2_count;
-  }
-  if(id == 0x1c)
-  {
-    if(servo_enable)
+    if(id == 0x1b)
     {
-      memcpy((unsigned char *)buff0x1c, buff, 4);
-      servo_angle = ((uint32_t)buff0x1c[3]) << 24 | ((uint32_t)buff0x1c[2]) << 16 | ((uint16_t)buff0x1c[1]) << 8 | ((uint16_t)buff0x1c[0]) << 0;
+      memcpy((unsigned char *)buff0x1b, buff, 3);
+      vib0_count = (buff0x1b[0]!=0) ? buff0x1b[0] : vib0_count;
+      vib1_count = (buff0x1b[1]!=0) ? buff0x1b[1] : vib1_count;
+      vib2_count = (buff0x1b[2]!=0) ? buff0x1b[2] : vib2_count;
     }
-  }
-  if(id == 0x20)
-  {
-    if(servo_enable)
+    if(id == 0x1c)
     {
-      memcpy((unsigned char *)buff0x20, buff, 1);
-      if(buff0x20[0] == 0x00)
+      if(servo_enable)
       {
-        dxl.torqueOff(DXL_ID);
+        memcpy((unsigned char *)buff0x1c, buff, 4);
+        servo_angle = ((uint32_t)buff0x1c[3]) << 24 | ((uint32_t)buff0x1c[2]) << 16 | ((uint16_t)buff0x1c[1]) << 8 | ((uint16_t)buff0x1c[0]) << 0;
       }
-      if(buff0x20[0] == 0x01)
+    }
+    if(id == 0x20)
+    {
+      if(servo_enable)
       {
-        dxl.torqueOn(DXL_ID);
+        memcpy((unsigned char *)buff0x20, buff, 1);
+        if(buff0x20[0] == 0x00)
+        {
+          dxl.torqueOff(DXL_ID);
+        }
+        if(buff0x20[0] == 0x01)
+        {
+          dxl.torqueOn(DXL_ID);
+        }
       }
     }
   }
 }
+
 void task10ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -121,7 +125,6 @@ void task10ms(void *pvParameters)
   }
 }
 
-
 void task20ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -129,6 +132,7 @@ void task20ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
+    //Serial.println("20ms");
     taskENTER_CRITICAL();
     uint16_t tof;
     tof = lox.readRangeResult();
@@ -148,6 +152,8 @@ void task20ms(void *pvParameters)
     data0x13[0] = (data0x13[0])&0x0f;
     CAN0.sendMsgBuf(0x13, 0, 1, data0x13);
     delayMicroseconds(500);
+
+    Serial.println(tof);
 
     if(servo_enable)
     {
@@ -239,7 +245,7 @@ void setup()
   
   pinMode(SPI_INT, INPUT);
   CAN0.setMode(MCP_NORMAL);
-  
+  Serial.println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
 
   xTaskCreate(task10ms, "task10ms", configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
@@ -250,5 +256,6 @@ void setup()
 
 void loop()
 {
+  
   delay(1);
 }
