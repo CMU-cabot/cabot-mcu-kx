@@ -27,3 +27,10 @@ MCP_CAN 1.5.1
 https://github.com/coryjfowler/MCP_CAN_lib  
 STM32FreeRTOS 10.3.2  
 https://github.com/stm32duino/STM32FreeRTOS  
+
+### Settings
+for STM32 based board  
+![STM32設定](https://github.com/user-attachments/assets/5e92fedd-792b-4af9-8a2d-fd6fe42dea43)  
+for ESP32 based board  
+![ESP32設定](https://github.com/user-attachments/assets/db395fd7-5742-4789-a4cb-e3f2e399044a)  
+
