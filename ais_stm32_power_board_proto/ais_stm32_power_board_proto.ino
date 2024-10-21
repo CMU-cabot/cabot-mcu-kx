@@ -498,6 +498,10 @@ void loop()
       poweron_cnt++;
     }
   }
+  else if(digitalRead(SW_0) != LOW)
+  {
+    poweron_cnt = 0;
+  }
   
   if(digitalRead(SW_1) == LOW && flag_sequencing == false && flag_power_on == true)
   {
@@ -511,6 +515,10 @@ void loop()
       shutdown_cnt++;
     }
   }
+  else if(digitalRead(SW_1) != LOW)
+  {
+    shutdown_cnt = 0;
+  }
   
   if(digitalRead(SW_2) == LOW && flag_sequencing == false && flag_power_on == true)
   {
@@ -523,6 +531,10 @@ void loop()
     {
       reboot_cnt++;
     }
+  }
+  else if(digitalRead(SW_2) != LOW)
+  {
+    reboot_cnt = 0;
   }
   
   //Serial.println(poweron_cnt);
