@@ -37,6 +37,10 @@
 #define PRESENT_POSITION_ADDR   132
 #define TIMEOUT                 10
 
+#define CHATA_THRESHOLD         3
+
+#define VIB_DUTY                127 //0~255
+
 MCP_CAN CAN0(SPI_CS_PIN);
 HardwareSerial dxif(DXIF_RXD, DXIF_TXD);
 Dynamixel2Arduino dxl(dxif, DXIF_DIR);
@@ -54,6 +58,20 @@ uint8_t data0x1f[4];
 uint8_t vib0_count;
 uint8_t vib1_count;
 uint8_t vib2_count;
+
+bool sw_right = false;
+bool sw_left  = false;
+bool sw_up    = false;
+bool sw_down  = false;
+
+int sw_r_on_cnt  = 0;
+int sw_r_off_cnt = 0;
+int sw_l_on_cnt  = 0;
+int sw_l_off_cnt = 0;
+int sw_u_on_cnt  = 0;
+int sw_u_off_cnt = 0;
+int sw_d_on_cnt  = 0;
+int sw_d_off_cnt = 0;
 
 uint32_t servo_angle = 2047;
 bool servo_enable = false;
@@ -106,6 +124,106 @@ void mcpISR(){
   }
 }
 
+void task2ms(void *pvParameters)
+{
+  portTickType xLastWakeTime;
+  const portTickType xFrequency = 2;
+  xLastWakeTime = xTaskGetTickCount();
+  while(1)
+  {
+    bool sw_r = digitalRead(SW_RIGHT);
+    bool sw_l = digitalRead(SW_LEFT);
+    bool sw_u = digitalRead(SW_UP);
+    bool sw_d = digitalRead(SW_DOWN);
+
+    if(sw_r == HIGH)
+    {
+      sw_r_on_cnt++;
+      sw_r_off_cnt = 0;
+      if(sw_r_on_cnt > CHATA_THRESHOLD)
+      {
+        sw_right = true;
+        sw_r_on_cnt = 0;
+      }
+    }
+    else
+    {
+      sw_r_off_cnt++;
+      sw_r_on_cnt = 0;
+      if(sw_r_off_cnt > CHATA_THRESHOLD)
+      {
+        sw_right = false;
+        sw_r_off_cnt = 0;
+      }
+    }
+
+    if(sw_l == HIGH)
+    {
+      sw_l_on_cnt++;
+      sw_l_off_cnt = 0;
+      if(sw_l_on_cnt > CHATA_THRESHOLD)
+      {
+        sw_left = true;
+        sw_l_on_cnt = 0;
+      }
+    }
+    else
+    {
+      sw_l_off_cnt++;
+      sw_l_on_cnt = 0;
+      if(sw_l_off_cnt > CHATA_THRESHOLD)
+      {
+        sw_left = false;
+        sw_l_off_cnt = 0;
+      }
+    }
+
+    if(sw_u == HIGH)
+    {
+      sw_u_on_cnt++;
+      sw_u_off_cnt = 0;
+      if(sw_u_on_cnt > CHATA_THRESHOLD)
+      {
+        sw_up = true;
+        sw_u_on_cnt = 0;
+      }
+    }
+    else
+    {
+      sw_u_off_cnt++;
+      sw_u_on_cnt = 0;
+      if(sw_u_off_cnt > CHATA_THRESHOLD)
+      {
+        sw_up = false;
+        sw_u_off_cnt = 0;
+      }
+    }
+
+    if(sw_d == HIGH)
+    {
+      sw_d_on_cnt++;
+      sw_d_off_cnt = 0;
+      if(sw_d_on_cnt > CHATA_THRESHOLD)
+      {
+        sw_down = true;
+        sw_d_on_cnt = 0;
+      }
+    }
+    else
+    {
+      sw_d_off_cnt++;
+      sw_d_on_cnt = 0;
+      if(sw_d_off_cnt > CHATA_THRESHOLD)
+      {
+        sw_down = false;
+        sw_d_off_cnt = 0;
+      }
+    }
+    
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+  }
+}
+
 void task10ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -144,11 +262,10 @@ void task20ms(void *pvParameters)
     CAN0.sendMsgBuf(0x12, 0, 4, data0x12);
     delayMicroseconds(500);
     
-    
-    data0x13[0] = digitalRead(SW_RIGHT) << 0
-                | digitalRead(SW_LEFT)  << 1
-                | digitalRead(SW_UP)    << 2
-                | digitalRead(SW_DOWN)  << 3;
+    data0x13[0] = sw_right << 0
+                | sw_left  << 1
+                | sw_up    << 2
+                | sw_down  << 3;
     data0x13[0] = (data0x13[0])&0x0f;
     CAN0.sendMsgBuf(0x13, 0, 1, data0x13);
     delayMicroseconds(500);
@@ -248,6 +365,7 @@ void setup()
   Serial.println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
 
+  xTaskCreate(task2ms,  "task2ms",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task10ms, "task10ms", configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
   xTaskCreate(task20ms, "task20ms", configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
 
