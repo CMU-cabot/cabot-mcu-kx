@@ -59,6 +59,14 @@ uint8_t vib0_count;
 uint8_t vib1_count;
 uint8_t vib2_count;
 
+uint8_t vib0_duty = 0;
+uint8_t vib1_duty = 0;
+uint8_t vib2_duty = 0;
+
+uint8_t vib0_duty_cnt = 0;
+uint8_t vib1_duty_cnt = 0;
+uint8_t vib2_duty_cnt = 0;
+
 bool sw_right = false;
 bool sw_left  = false;
 bool sw_up    = false;
@@ -251,7 +259,7 @@ void task20ms(void *pvParameters)
   while(1)
   {
     //Serial.println("20ms");
-    taskENTER_CRITICAL();
+    //taskENTER_CRITICAL();
     uint16_t tof;
     tof = lox.readRangeResult();
     data0x12[0] = (tof & 0x00ff) >> 0;
@@ -259,7 +267,10 @@ void task20ms(void *pvParameters)
     data0x12[2] = cap_sens.getSensorInput1DeltaCountReg();
     data0x12[3] = cap_sens.getSensorInputStatusReg();
     cap_sens.setMainControlReg(false, false, false);
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
     CAN0.sendMsgBuf(0x12, 0, 4, data0x12);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
     
     data0x13[0] = sw_right << 0
@@ -267,7 +278,10 @@ void task20ms(void *pvParameters)
                 | sw_up    << 2
                 | sw_down  << 3;
     data0x13[0] = (data0x13[0])&0x0f;
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
     CAN0.sendMsgBuf(0x13, 0, 1, data0x13);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
 
     Serial.println(tof);
@@ -284,9 +298,12 @@ void task20ms(void *pvParameters)
       data0x1f[1] = (angle & 0x0000ff00) >> 8;
       data0x1f[2] = (angle & 0x00ff0000) >> 16;
       data0x1f[3] = (angle & 0xff000000) >> 24;
+      detachInterrupt(digitalPinToInterrupt(SPI_INT));
       CAN0.sendMsgBuf(0x1f, 0, 4, data0x1f);
+      attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
+      if(digitalRead(SPI_INT) == LOW){mcpISR();}
     }
-    taskEXIT_CRITICAL();
+    //taskEXIT_CRITICAL();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
