@@ -35,6 +35,21 @@ volatile bool flag_sequencing = false;
 
 char node_id = 0x21;
 
+int checkSlave(uint8_t addr)
+{
+  int err = 0;
+  Wire.beginTransmission(addr);
+  err = Wire.endTransmission( );
+  if(err != 0)
+  {
+    Wire.end();
+    delayMicroseconds(500);
+    Wire.begin();
+    delayMicroseconds(500);
+  }
+  return err;
+}
+
 void mcpISR(){
   long unsigned int id;
   unsigned char len = 0;
@@ -51,13 +66,20 @@ void task_measure(void *pvParameters)
   while(1)
   {
      int16_t temp;
+     int err = checkSlave(ADDR_ADT);
+     Serial.print("ADT ");
+     Serial.print(err);
      Wire.requestFrom(ADDR_ADT, 2);
      temp = (((uint16_t)(Wire.read())<<8) | Wire.read())>>3;
+     Serial.print("  temp ");
+     Serial.println(temp);
 
      byte send_data[2] = {0};
      send_data[0] = (temp & 0x00ff)>>0;
      send_data[1] = (temp & 0xff00)>>8;
+     detachInterrupt(digitalPinToInterrupt(SPI_INT));
      CAN0.sendMsgBuf(node_id, 0, 2, send_data);
+     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
      vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -101,7 +123,7 @@ void setup()
      | digitalRead(DIP_SW_3) << 3;
   node_id += id;
 
-  CAN0.begin(MCP_ANY, CAN_1000KBPS, MCP_20MHZ);
+  CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
   CAN0.init_Mask(0,0,0x07ff0000);
   CAN0.init_Filt(0,0,0x00000000);
   CAN0.setMode(MCP_NORMAL);
