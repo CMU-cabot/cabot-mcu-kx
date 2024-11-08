@@ -349,7 +349,10 @@ void task_send(void *pvParameters)
     indicator[0] = digitalRead(LED_0) << 0
                  | digitalRead(LED_1) << 1
                  | digitalRead(LED_2) << 2;
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
     CAN0.sendMsgBuf(0x03, 0, 1, indicator);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
     vTaskDelay(1);
     //delayMicroseconds(500);
 
@@ -398,8 +401,11 @@ void task_send(void *pvParameters)
 
       battery_sn[i*2]   = (sn&0x00ff) >> 0;
       battery_sn[i*2+1] = (sn&0xff00) >> 8;
-      
+
+      detachInterrupt(digitalPinToInterrupt(SPI_INT));
       CAN0.sendMsgBuf(0x05+i, 0, 8, battery);
+      attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
+      if(digitalRead(SPI_INT) == LOW){mcpISR();}
       vTaskDelay(1);
       
       //delayMicroseconds(500);
@@ -412,11 +418,17 @@ void task_send(void *pvParameters)
              | digitalRead(G_12V_D455_1) << 3
              | digitalRead(G_12V_PC)     << 4
              | digitalRead(G_24V)        << 5;
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
     CAN0.sendMsgBuf(0x14, 0, 1, data);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
     vTaskDelay(1);
     //delayMicroseconds(500);
 
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
     CAN0.sendMsgBuf(0x1d, 0, 8, battery_sn);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
     
     //taskEXIT_CRITICAL();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
