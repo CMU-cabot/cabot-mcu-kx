@@ -1,0 +1,26 @@
+version: "2.3"
+
+
+services:
+  esp32:
+    build: 
+      context: .
+      dockerfile: Dockerfile.esp32
+    environment:
+      - ARDUINO_BOARD
+      - ARDUINO_PORT
+    volumes:
+      - ./ais_esp32_sensor_board_proto:/mnt/ais_esp32_sensor_board_proto
+      - /dev:/dev
+      - /sys/devices:/sys/devices
+# required for display or device
+    privileged: true
+# device, bluetooth
+    devices:
+      - /dev/dri
+# device, bluetooth
+    network_mode: host
+    working_dir: /mnt/ais_esp32_sensor_board_proto
+    command:
+      - "bash"
+
