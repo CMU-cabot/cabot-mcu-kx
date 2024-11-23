@@ -24,3 +24,40 @@ services:
     command:
       - "bash"
 
+  stm32:
+    build:
+      context: .
+      dockerfile: Dockerfile.stm32
+    environment:
+      - ARDUINO_BOARD
+      - ARDUINO_PORT
+    volumes:
+      - /dev:/dev
+      - /sys/devices:/sys/devices
+# required for display or device
+    privileged: true
+# device, bluetooth
+    devices:
+      - /dev/dri
+# device, bluetooth
+    network_mode: host
+    command:
+      - "bash"
+
+  stm32-handle:
+    extends: stm32
+    volumes:
+      - ./ais_stm32_handle_board_proto:/mnt/ais_stm32_handle_board_proto
+    working_dir: /mnt/ais_stm32_handle_board_proto
+
+  stm32-power:
+    extends: stm32
+    volumes:
+      - ./ais_stm32_power_board_proto:/mnt/ais_stm32_power_board_proto
+    working_dir: /mnt/ais_stm32_power_board_proto
+
+  stm32-thermo:
+    extends: stm32
+    volumes:
+      - ./ais_stm32_thermo_board_proto:/mnt/ais_stm32_thermo_board_proto
+    working_dir: /mnt/ais_stm32_thermo_board_proto
