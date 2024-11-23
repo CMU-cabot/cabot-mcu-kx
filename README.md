@@ -34,3 +34,28 @@ for STM32 based board
 for ESP32 based board  
 ![ESP32設定](https://github.com/user-attachments/assets/db395fd7-5742-4789-a4cb-e3f2e399044a)  
 
+### docker environment
+
+- build
+```
+docker compose build
+```
+
+- run container for each project
+```
+docker compose run --rm esp32 bash
+docker compose run --rm stm32-handle bash
+docker compose run --rm stm32-power bash
+docker compose run --rm stm32-thermo bash
+```
+
+- build and upload
+  - you may need to specify the port with `-p` option
+```
+./build.sh
+./build.sh upload
+
+or
+
+./build.sh all
+```

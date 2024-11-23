@@ -1,0 +1,11 @@
+FROM jpconstantineau/arduino-cli:0.33.0
+
+RUN arduino-cli config init
+COPY arduino-cli-esp32.yaml /opt/arduino/arduino-cli.yaml
+RUN arduino-cli core update-index
+RUN arduino-cli core install esp32:esp32@2.0.17
+RUN arduino-cli lib update-index
+RUN arduino-cli lib install "Adafruit BME280 Library"@2.2.4
+RUN arduino-cli lib install "Adafruit BNO055"@1.6.3
+RUN arduino-cli lib install "CAN"@0.3.1
+RUN pip3 install pyserial

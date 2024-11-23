@@ -1,0 +1,13 @@
+FROM jpconstantineau/arduino-cli:0.33.0
+
+RUN arduino-cli config init
+COPY arduino-cli-stm32.yaml /opt/arduino/arduino-cli.yaml
+RUN arduino-cli core update-index
+RUN arduino-cli core install STMicroelectronics:stm32@2.7.1
+RUN arduino-cli lib update-index
+RUN arduino-cli lib install "STM32duino FreeRTOS"@10.3.2
+RUN arduino-cli lib install "mcp_can"@1.5.1
+RUN arduino-cli lib install "Dynamixel2Arduino"@0.5.3
+RUN arduino-cli lib install "Adafruit_VL53L0X"@1.2.4
+RUN arduino-cli lib install "Adafruit BusIO"@1.16.0
+RUN pip3 install pyserial
