@@ -50,9 +50,12 @@ cap1203 cap_sens(&Wire);
 volatile unsigned char buff0x1b[3];
 volatile unsigned char buff0x1c[4];
 volatile unsigned char buff0x20[1];
+volatile unsigned char buff0x41[1];
+volatile unsigned char buff0x42[1];
 
 byte data0x12[4] = {0};
-byte data0x13[1] = {0}; 
+byte data0x13[1] = {0};
+byte data0x40[3] = {0};
 uint8_t data0x1f[4];
 
 uint8_t vib0_count;
@@ -128,6 +131,16 @@ void mcpISR(){
           dxl.torqueOn(DXL_ID);
         }
       }
+    }
+    if(id == 0x41)
+    {
+      memcpy((unsigned char *)buff0x41, buff, 1);
+      cap_sens.setCalibrationStatusReg(buff0x41[0]);
+    }
+    if(id == 0x42)
+    {
+      memcpy((unsigned char *)buff0x42, buff, 1);
+      cap_sens.setNegativeDeltaCountReg(buff0x42[0]);
     }
   }
 }
@@ -272,7 +285,16 @@ void task20ms(void *pvParameters)
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
-    
+
+    data0x40[0] = cap_sens.getGeneralStatusReg();
+    data0x40[1] = cap_sens.getNoiseFlagStatsReg();
+    data0x40[2] = cap_sens.getCalibrationStatusReg();
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+    CAN0.sendMsgBuf(0x40, 0, 3, data0x40);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    delayMicroseconds(500);
+
     data0x13[0] = sw_right << 0
                 | sw_left  << 1
                 | sw_up    << 2
