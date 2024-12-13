@@ -56,6 +56,12 @@ services:
       - ./ais_stm32_power_board_proto:/mnt/ais_stm32_power_board_proto
     working_dir: /mnt/ais_stm32_power_board_proto
 
+  stm32-power-prod:
+    extends: stm32
+    volumes:
+      - ./ais_stm32_power_board:/mnt/ais_stm32_power_board
+    working_dir: /mnt/ais_stm32_power_board
+
   stm32-thermo:
     extends: stm32
     volumes:
