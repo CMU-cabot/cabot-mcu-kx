@@ -1,5 +1,6 @@
 #include <STM32FreeRTOS.h>
-#include <mcp_can.h>
+//#include <mcp_can.h>
+#include <mcp_canbus.h>
 #include <SPI.h>
 #include <Wire.h>
 
@@ -151,7 +152,7 @@ void mcpISR(){
 
   while(CAN0.checkReceive()==CAN_MSGAVAIL)
   {
-    CAN0.readMsgBuf(&id, &len, buff);
+    CAN0.readMsgBufID(&id, &len, buff);
   
     if((id & 0x80000000) == 0x80000000){return;}
 
@@ -472,10 +473,11 @@ void setup()
   digitalWrite(LED_0, LOW);
   digitalWrite(LED_1, LOW);
 
-  CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
+  //CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
+  CAN0.begin(CAN_1000KBPS); // 16MHz
   CAN0.init_Filt(0,0,CAN_FILTER);
   CAN0.init_Mask(0,0,CAN_MASK);
-  CAN0.setMode(MCP_NORMAL);
+  //CAN0.setMode(MCP_NORMAL);
   pinMode(SPI_INT, INPUT);
 
   semaphoreSequence = xSemaphoreCreateBinary();
