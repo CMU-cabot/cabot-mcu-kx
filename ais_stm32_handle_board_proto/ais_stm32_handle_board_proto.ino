@@ -81,6 +81,7 @@ int sw_u_off_cnt = 0;
 int sw_d_on_cnt  = 0;
 int sw_d_off_cnt = 0;
 
+volatile bool onoff_recived = false;
 uint32_t servo_angle = 2047;
 bool servo_enable = false;
 const uint8_t DXL_ID = 1;
@@ -119,14 +120,15 @@ void mcpISR(){
       if(servo_enable)
       {
         memcpy((unsigned char *)buff0x20, buff, 1);
-        if(buff0x20[0] == 0x00)
+        onoff_recived = true;
+        /*if(buff0x20[0] == 0x00)
         {
           dxl.torqueOff(DXL_ID);
         }
         if(buff0x20[0] == 0x01)
         {
           dxl.torqueOn(DXL_ID);
-        }
+        }*/
       }
     }
   }
@@ -288,6 +290,19 @@ void task20ms(void *pvParameters)
 
     if(servo_enable)
     {
+      if(onoff_recived == true)
+      {
+        if(buff0x20[0] == 0x00)
+        {
+          dxl.torqueOff(DXL_ID);
+        }
+        if(buff0x20[0] == 0x01)
+        {
+          dxl.torqueOn(DXL_ID); 
+        }
+        onoff_recived == false;
+      }
+      
       //dxl.write(DXL_ID, GOAL_POSITION_ADDR, (uint8_t*)&servo_angle, 4, TIMEOUT);
       dxl.setGoalPosition(DXL_ID, servo_angle);
       delayMicroseconds(500);
