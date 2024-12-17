@@ -8,17 +8,38 @@
 
 #include <utility/imumaths.h>
 
-#define DIVIDER80   80
-#define GPIO_ANT1   2
-#define GPIO_ANT2   25
+#define DIVIDER80     80
+#define GPIO_ANT1     2
+#define GPIO_ANT2     25
 
-#define I2C_SDA     21
-#define I2C_SCL     22
+#define I2C_SDA       21
+#define I2C_SCL       22
 
-#define BME_CS      17
-#define ADDR_BNO    0x28
-#define BME_RST    32
-#define BNO_RST    14
+#define BME_CS        17
+#define ADDR_BNO      0x28
+#define BME_RST       32
+#define BNO_RST       14
+
+#define ADDR_IMU_ACC  0x010
+#define ADDR_IMU_ANG  0x011
+#define ADDR_IMU_ORI  0x012
+#define ADDR_BME      0x018
+#define ADDR_IMU_CAL  0x430
+#define ADDR_IMU_WR0  0x431
+#define ADDR_IMU_WR1  0x432
+#define ADDR_IMU_WR2  0x433
+#define ADDR_IMU_STAT 0x438
+#define ADDR_IMU_RE0  0x439
+#define ADDR_IMU_RE1  0x43a
+#define ADDR_IMU_RE2  0x43b
+#define ADDR_WIFI0    0x428
+#define ADDR_WIFI1    0x429
+#define ADDR_WIFI2    0x42a
+#define ADDR_WIFI3    0x42b
+#define ADDR_WIFI4    0x42c
+
+#define CAN_FILTER    0x430
+#define CAN_MASK      0x7f8
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 
@@ -28,13 +49,13 @@ xSemaphoreHandle xCANSemaphore;
 Adafruit_BNO055 bno = Adafruit_BNO055(-1, 0x28, &Wire);
 Adafruit_BME280 bme(BME_CS);
 
-volatile unsigned char buff0x31[8] = {0};
-volatile unsigned char buff0x32[8] = {0};
-volatile unsigned char buff0x33[8] = {0};
+volatile unsigned char buff_imu_wr0[8] = {0};
+volatile unsigned char buff_imu_wr1[8] = {0};
+volatile unsigned char buff_imu_wr2[8] = {0};
 
-volatile bool flag_buff0x31 = false;
-volatile bool flag_buff0x32 = false;
-volatile bool flag_buff0x33 = false;
+volatile bool flag_buff_imu_wr0 = false;
+volatile bool flag_buff_imu_wr1 = false;
+volatile bool flag_buff_imu_wr2 = false;
 
 adafruit_bno055_offsets_t calib_data;
 
@@ -61,7 +82,7 @@ void task10ms(void *pvParameters)
     readlen(Adafruit_BNO055::BNO055_QUATERNION_DATA_W_LSB_ADDR, quat, 8);
 
     xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-    CAN.beginPacket(0x09);
+    CAN.beginPacket(ADDR_IMU_ACC);
     CAN.write(acc[0]);
     CAN.write(acc[1]);
     CAN.write(acc[2]);
@@ -71,7 +92,7 @@ void task10ms(void *pvParameters)
     CAN.endPacket();
     ets_delay_us(200);
 
-    CAN.beginPacket(0x0a);
+    CAN.beginPacket(ADDR_IMU_ANG);
     CAN.write(gyro[0]);
     CAN.write(gyro[1]);
     CAN.write(gyro[2]);
@@ -81,7 +102,7 @@ void task10ms(void *pvParameters)
     CAN.endPacket();
     ets_delay_us(200);
 
-    CAN.beginPacket(0x0b);
+    CAN.beginPacket(ADDR_IMU_ORI);
     CAN.write(quat[2]);
     CAN.write(quat[3]);
     CAN.write(quat[4]);
@@ -121,7 +142,7 @@ void taskWifi(void *pvParameters)
           for(int f=0;f<4;f++)
           {
             xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-            CAN.beginPacket(0x0c+f);
+            CAN.beginPacket(ADDR_WIFI0+f);
             for(int b=0;b<8;b++)
             {
               CAN.write(data[f*8+b]);
@@ -132,7 +153,7 @@ void taskWifi(void *pvParameters)
           }  
 
           xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-          CAN.beginPacket(0x10);
+          CAN.beginPacket(ADDR_WIFI4);
           CAN.write(bssid[0]);
           CAN.write(bssid[1]);
           CAN.write(bssid[2]);
@@ -161,7 +182,7 @@ void task500ms(void *pvParameters)
     int32_t pres = (uint32_t)(bme.readPressure()   * 100);
 
     xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-    CAN.beginPacket(0x11);
+    CAN.beginPacket(ADDR_BME);
     CAN.write((temp & 0x00ff) >> 0);
     CAN.write((temp & 0xff00) >> 8);
     CAN.write((hum  & 0x00ff) >> 0);
@@ -177,7 +198,7 @@ void task500ms(void *pvParameters)
     uint8_t system, gyro, accel, mag;
     bno.getCalibration(&system, &gyro, &accel, &mag);
     xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-    CAN.beginPacket(0x37);
+    CAN.beginPacket(ADDR_IMU_STAT);
     CAN.write(system);
     CAN.write(gyro);
     CAN.write(accel);
@@ -200,7 +221,7 @@ void setup() {
   delay(100);
   digitalWrite(BME_RST, LOW);
   digitalWrite(BNO_RST, HIGH);
-  delay(100);
+  delay(1000);
   
   calib_data = {0};
   Serial.begin(1000000);
@@ -226,19 +247,19 @@ void setup() {
   }
   
   // start the CAN bus at 1Mbps
-  if (!CAN.begin(1000E3)) {
-    while (1);
+  while(!CAN.begin(1000E3)) {
+    delay(10);
   }
 
-  CAN.filter(0x030, 0x7f0);
+  CAN.filter(CAN_FILTER, CAN_MASK);
   
   //CAN bug fix
   volatile uint32_t* pREG_IER = (volatile uint32_t*)0x3ff6b010;
   *pREG_IER &= ~(uint8_t)0x10;
   
-  if (!bno.begin())
+  while(!bno.begin())
   {
-    while (1);
+    delay(10);
   }
   delay(100);
   bno.setMode(OPERATION_MODE_NDOF);
@@ -264,7 +285,7 @@ void loop() {
       {
         buff[i] = CAN.read();
       }
-      if(CAN.packetId() == 0x38)
+      if(CAN.packetId() == ADDR_IMU_CAL)
       {
         if(buff[0] == 0x00)
         {
@@ -282,7 +303,7 @@ void loop() {
           Serial.println(calib_data.mag_radius);
 
           xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-          CAN.beginPacket(0x34);
+          CAN.beginPacket(ADDR_IMU_RE0);
           CAN.write(((uint16_t)calib_data.accel_offset_x & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.accel_offset_x & 0xff00)>>8);
           CAN.write(((uint16_t)calib_data.accel_offset_y & 0x00ff)>>0);
@@ -296,7 +317,7 @@ void loop() {
           ets_delay_us(200);
 
           xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-          CAN.beginPacket(0x35);
+          CAN.beginPacket(ADDR_IMU_RE1);
           CAN.write(((uint16_t)calib_data.mag_offset_y   & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.mag_offset_y   & 0xff00)>>8);
           CAN.write(((uint16_t)calib_data.mag_offset_z   & 0x00ff)>>0);
@@ -310,7 +331,7 @@ void loop() {
           ets_delay_us(200);
 
           xSemaphoreTake(xCANSemaphore, portMAX_DELAY);
-          CAN.beginPacket(0x36);
+          CAN.beginPacket(ADDR_IMU_RE2);
           CAN.write(((uint16_t)calib_data.gyro_offset_z  & 0x00ff)>>0);
           CAN.write(((uint16_t)calib_data.gyro_offset_z  & 0xff00)>>8);
           CAN.write(((uint16_t)calib_data.accel_radius   & 0x00ff)>>0);
@@ -322,43 +343,43 @@ void loop() {
           ets_delay_us(200);
         }
       
-        if(buff[0] == 0x01 && flag_buff0x31 && flag_buff0x32 && flag_buff0x33)
+        if(buff[0] == 0x01 && flag_buff_imu_wr0 && flag_buff_imu_wr1 && flag_buff_imu_wr2)
         {
-          calib_data.accel_offset_x = (int16_t)(buff0x31[1]<<8) | (int16_t)(buff0x31[0]);
-          calib_data.accel_offset_y = (int16_t)(buff0x31[3]<<8) | (int16_t)(buff0x31[2]);
-          calib_data.accel_offset_z = (int16_t)(buff0x31[5]<<8) | (int16_t)(buff0x31[4]);
+          calib_data.accel_offset_x = (int16_t)(buff_imu_wr0[1]<<8) | (int16_t)(buff_imu_wr0[0]);
+          calib_data.accel_offset_y = (int16_t)(buff_imu_wr0[3]<<8) | (int16_t)(buff_imu_wr0[2]);
+          calib_data.accel_offset_z = (int16_t)(buff_imu_wr0[5]<<8) | (int16_t)(buff_imu_wr0[4]);
 
-          calib_data.mag_offset_x   = (int16_t)(buff0x31[7]<<8) | (int16_t)(buff0x31[6]);
-          calib_data.mag_offset_y   = (int16_t)(buff0x32[1]<<8) | (int16_t)(buff0x32[0]);
-          calib_data.mag_offset_z   = (int16_t)(buff0x32[3]<<8) | (int16_t)(buff0x32[2]);
+          calib_data.mag_offset_x   = (int16_t)(buff_imu_wr0[7]<<8) | (int16_t)(buff_imu_wr0[6]);
+          calib_data.mag_offset_y   = (int16_t)(buff_imu_wr1[1]<<8) | (int16_t)(buff_imu_wr1[0]);
+          calib_data.mag_offset_z   = (int16_t)(buff_imu_wr1[3]<<8) | (int16_t)(buff_imu_wr1[2]);
 
-          calib_data.gyro_offset_x  = (int16_t)(buff0x32[5]<<8) | (int16_t)(buff0x32[4]);
-          calib_data.gyro_offset_y  = (int16_t)(buff0x32[7]<<8) | (int16_t)(buff0x32[6]);
-          calib_data.gyro_offset_z  = (int16_t)(buff0x33[1]<<8) | (int16_t)(buff0x33[0]);
+          calib_data.gyro_offset_x  = (int16_t)(buff_imu_wr1[5]<<8) | (int16_t)(buff_imu_wr1[4]);
+          calib_data.gyro_offset_y  = (int16_t)(buff_imu_wr1[7]<<8) | (int16_t)(buff_imu_wr1[6]);
+          calib_data.gyro_offset_z  = (int16_t)(buff_imu_wr2[1]<<8) | (int16_t)(buff_imu_wr2[0]);
 
-          calib_data.accel_radius   = (int16_t)(buff0x33[3]<<8) | (int16_t)(buff0x33[2]);
-          calib_data.mag_radius     = (int16_t)(buff0x33[5]<<8) | (int16_t)(buff0x33[4]);
+          calib_data.accel_radius   = (int16_t)(buff_imu_wr2[3]<<8) | (int16_t)(buff_imu_wr2[2]);
+          calib_data.mag_radius     = (int16_t)(buff_imu_wr2[5]<<8) | (int16_t)(buff_imu_wr2[4]);
 
           bno.setSensorOffsets(calib_data);
-          flag_buff0x31 = false;
-          flag_buff0x32 = false;
-          flag_buff0x33 = false;
+          flag_buff_imu_wr0 = false;
+          flag_buff_imu_wr1 = false;
+          flag_buff_imu_wr2 = false;
         }
       }
-      if(CAN.packetId() == 0x31)
+      if(CAN.packetId() == ADDR_IMU_WR0)
       {
-        memcpy((unsigned char *)buff0x31, buff, 8);
-        flag_buff0x31 = true;
+        memcpy((unsigned char *)buff_imu_wr0, buff, 8);
+        flag_buff_imu_wr0 = true;
       }
-      if(CAN.packetId() == 0x32)
+      if(CAN.packetId() == ADDR_IMU_WR1)
       {
-        memcpy((unsigned char *)buff0x32, buff, 8);
-        flag_buff0x32 = true;
+        memcpy((unsigned char *)buff_imu_wr1, buff, 8);
+        flag_buff_imu_wr1 = true;
       }
-      if(CAN.packetId() == 0x33)
+      if(CAN.packetId() == ADDR_IMU_WR2)
       {
-        memcpy((unsigned char *)buff0x33, buff, 8);
-        flag_buff0x33 = true;
+        memcpy((unsigned char *)buff_imu_wr2, buff, 8);
+        flag_buff_imu_wr2 = true;
       }
     }
   }
