@@ -23,13 +23,17 @@
 #define STM32_RXD     PA10
 
 #define ADT_RTS       PA1
-#define SENS_ADT      0x48
-
-#define ADDR_BASE     0x21
+#define ADDR_ADT      0x48
 
 MCP_CAN CAN0(SPI_CS_PIN);
 
-char node_id = ADDR_BASE;
+volatile bool flag_power_on   = false;
+volatile bool flag_shutdown   = false;
+volatile bool flag_rebooting  = false;
+volatile bool flag_emergency  = false;
+volatile bool flag_sequencing = false;
+
+char node_id = 0x21;
 
 int checkSlave(uint8_t addr)
 {
@@ -62,10 +66,10 @@ void task_measure(void *pvParameters)
   while(1)
   {
      int16_t temp;
-     int err = checkSlave(SENS_ADT);
+     int err = checkSlave(ADDR_ADT);
      Serial.print("ADT ");
      Serial.print(err);
-     Wire.requestFrom(SENS_ADT, 2);
+     Wire.requestFrom(ADDR_ADT, 2);
      temp = (((uint16_t)(Wire.read())<<8) | Wire.read())>>3;
      Serial.print("  temp ");
      Serial.println(temp);

@@ -28,16 +28,11 @@
 #define ADDR_MAIN_CONTROL                   0x00
 #define ADDR_GENERAL_STATUS                 0x02
 #define ADDR_SENSOR_INPUT_STATUS            0x03
-#define ADDR_NOISE_FLAG_STATUS              0x0A
 #define ADDR_SENSOR_INPUT_1_DELTA_COUNT     0x10
 #define ADDR_SENSOR_INPUT_2_DELTA_COUNT     0x11
 #define ADDR_SENSOR_INPUT_3_DELTA_COUNT     0x12
 #define ADDR_SENSITIVITY_CONTROL            0x1F
-#define ADDR_CALIBREATION_STATUS            0x26
 #define ADDR_INTERRUPT_ENABLE               0x27
-#define ADDR_RECALIBRATION_CONFIGURATION    0x2F
-
-#define RC_NEG_DELTA_MASK                   0x18
 
 class cap1203
 {
@@ -49,8 +44,6 @@ class cap1203
         void setMainControlReg(bool _int, bool _dsleep, bool _stby);
         void setSensitivityControlReg(uint8_t _base_shift, uint8_t _delta_sense);
         void setInterruptEnableReg(bool _cs1_int_en, bool _cs2_int_en, bool _cs3_int_en);
-        void setCalibrationStatusReg(uint8_t status);
-        void setNegativeDeltaCountReg(uint8_t status);
 
         uint8_t getMainControlReg();
         uint8_t getGeneralStatusReg();
@@ -60,8 +53,6 @@ class cap1203
         int8_t  getSensorInput3DeltaCountReg();
         uint8_t getSensitivityControlReg();
         uint8_t getInterruptEnableReg();
-        uint8_t getNoiseFlagStatsReg();
-        uint8_t getCalibrationStatusReg();
         
     private:
         uint8_t cap1203_addr = 0x28;
