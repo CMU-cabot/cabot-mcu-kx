@@ -1,5 +1,5 @@
 #include <STM32FreeRTOS.h>
-#include <mcp_can.h>
+#include <mcp2515.h>
 #include <SPI.h>
 #include <Wire.h>
 
@@ -61,7 +61,7 @@
 #define SHUTDOWN_PC   60000   //pc shutdown wait time[ms]
 #define SHUTDOWN_FRC  120000  //force shutdown time[ms]
 
-MCP_CAN CAN0(SPI_CS_PIN);
+MCP2515 mcp2515(SPI_CS_PIN);
 
 volatile SemaphoreHandle_t semaphoreSequence;
 
@@ -146,28 +146,22 @@ int checkSlave(uint8_t addr)
 
 void mcpISR(){
   Serial.println("isr");
-  long unsigned int id;
-  unsigned char len = 0;
-  unsigned char buff[8];
+  struct can_frame recvMsg;
 
-  while(CAN0.checkReceive()==CAN_MSGAVAIL)
+  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
   {
-    CAN0.readMsgBuf(&id, &len, buff);
-  
-    if((id & 0x80000000) == 0x80000000){return;}
-
-    if(id == ADDR_ODRIVE)
+    if(recvMsg.can_id == ADDR_ODRIVE)
     {
-      memcpy((unsigned char *)buff_odrive, buff, 1);
+      buff_odrive[0] = recvMsg.data[0];
       (buff_odrive[0]&0x01 == 0x01) ? (digitalWrite(G_24V, HIGH)) : (digitalWrite(G_24V, LOW));
       if(buff_odrive[0]&0x01 == 0x01 && flag_emergency == true)
       {
         flag_emergency = false;
       }
     }
-    if(id == ADDR_PC)
+    if(recvMsg.can_id == ADDR_PC)
     {
-      memcpy((unsigned char *)buff_pc, buff, 1);
+      buff_pc[0] = recvMsg.data[0];
       if(buff_pc[0] == 0x00)
       {
         shutdownISR();
@@ -177,32 +171,33 @@ void mcpISR(){
         poweronISR();
       }
     }
-    if(id == ADDR_D455_1)
+    if(recvMsg.can_id == ADDR_D455_1)
     {
-      memcpy((unsigned char *)buff_d455_1, buff, 1);
+      buff_d455_1[0] = recvMsg.data[0];
       (buff_d455_1[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_1, HIGH)) : (digitalWrite(G_12V_D455_1, LOW));
     }
-    if(id == ADDR_D455_2)
+    if(recvMsg.can_id == ADDR_D455_2)
     {
-      memcpy((unsigned char *)buff_d455_2, buff, 1);
+      buff_d455_2[0] = recvMsg.data[0];
       (buff_d455_2[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_2, HIGH)) : (digitalWrite(G_12V_D455_2, LOW));
     }
-    if(id == ADDR_D455_3)
+    if(recvMsg.can_id == ADDR_D455_3)
     {
-      memcpy((unsigned char *)buff_d455_3, buff, 1);
+      buff_d455_3[0] = recvMsg.data[0];
       (buff_d455_3[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_3, HIGH)) : (digitalWrite(G_12V_D455_3, LOW));
     }
-    if(id == ADDR_MCU)
+    if(recvMsg.can_id == ADDR_MCU)
     {
-      memcpy((unsigned char *)buff_mcu, buff, 1);
+      buff_mcu[0] = recvMsg.data[0];
       (buff_mcu[0]&0x01 == 0x01) ? (digitalWrite(G_5V_MCU, HIGH)) : (digitalWrite(G_5V_MCU, LOW));
     }
-    if(id == ADDR_PWM)
+    if(recvMsg.can_id == ADDR_PWM)
     {
-      memcpy((unsigned char *)buff_pwm, buff, 1);
+      buff_pwm[0] = recvMsg.data[0];
       analogWrite(PWM_FAN, 255 - buff_pwm[0]);
     }
-  }  
+  }
+  mcp2515.clearInterrupts();  
 }
 
 void emergencyISR()
@@ -213,9 +208,11 @@ void emergencyISR()
     taskENTER_CRITICAL();
     digitalWrite(G_24V, LOW);
     flag_emergency = true;
-    byte data[1] = {0};
-    data[0] = 0x01;
-    CAN0.sendMsgBuf(ADDR_EMS, 0, 1, data);
+    struct can_frame sendMsg;
+    sendMsg.can_id = ADDR_EMS;
+    sendMsg.can_dlc = 1;
+    sendMsg.data[0] = 0x01;
+    mcp2515.sendMessage(&sendMsg);
     taskEXIT_CRITICAL();
   }
 }
@@ -228,9 +225,6 @@ void poweronISR()
     flag_sequencing = true;
     digitalWrite(LED_0, HIGH);
     flag_power_on = true;
-    //byte data[1] = {0};
-    //data[0] = 0x01;
-    //CAN0.sendMsgBuf(0x02, 0, 1, data);
     xSemaphoreGiveFromISR(semaphoreSequence, NULL);
   }
 }
@@ -243,9 +237,6 @@ void shutdownISR()
     flag_sequencing = true;
     digitalWrite(LED_1, HIGH);
     flag_shutdown  = true;
-    //byte data[1] = {0};
-    //data[0] = 0x00;
-    //CAN0.sendMsgBuf(0x02, 0, 1, data);
     xSemaphoreGiveFromISR(semaphoreSequence, NULL);
   }
 }
@@ -257,12 +248,14 @@ void task_sequence(void *pvParameters)
   {
     xSemaphoreTake(semaphoreSequence, portMAX_DELAY);
     Serial.println("sequence");
-    byte data[1] = {0};
+    struct can_frame sendMsg;
+    sendMsg.can_id = ADDR_SEQ;
+    sendMsg.can_dlc = 1;
     
     if(flag_power_on == true && flag_shutdown == false)
     {
-      data[0] = 0x01;
-      CAN0.sendMsgBuf(ADDR_SEQ, 0, 1, data);
+      sendMsg.data[0] = 0x01;
+      mcp2515.sendMessage(&sendMsg);
       
       digitalWrite(G_24V, HIGH);
       vTaskDelay(100);
@@ -284,8 +277,8 @@ void task_sequence(void *pvParameters)
     }
     else if(flag_power_on == true && flag_shutdown == true)
     {
-      data[0] = 0x00;
-      CAN0.sendMsgBuf(ADDR_SEQ, 0, 1, data);
+      sendMsg.data[0] = 0x00;
+      mcp2515.sendMessage(&sendMsg);
       
       //shutdown sequence
       while(sequence_cnt<SHUTDOWN_FRC)
@@ -331,11 +324,13 @@ void task_send(void *pvParameters)
   {
     //taskENTER_CRITICAL();
     Serial.println("send");
-    byte indicator[1] = {0};
-    indicator[0] = digitalRead(LED_0) << 0
-                 | digitalRead(LED_1) << 1;
+    struct can_frame sendMsg;
+    sendMsg.can_id = ADDR_IND;
+    sendMsg.can_dlc = 1;
+    sendMsg.data[0] = digitalRead(LED_0) << 0
+                    | digitalRead(LED_1) << 1;
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(ADDR_IND, 0, 1, indicator);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     vTaskDelay(1);
@@ -346,7 +341,6 @@ void task_send(void *pvParameters)
     uint16_t charge   = 0;
     uint16_t temp     = 0;
     uint16_t sn       = 0;
-    byte battery[8]   = {0};
     byte battery_sn[8]= {0};
     
     for(int i=0;i<4;i++)
@@ -374,44 +368,57 @@ void task_send(void *pvParameters)
       charge  = readWord(SMBUS_CHARGE);  //RelativeStateOfCharge[%]
       temp    = readWord(SMBUS_TEMP);    //Temperature[0.1k]
       sn      = readWord(SMBUS_SERIAL);  //SerialNumber
-      
-      battery [0] = (voltage&0x00ff)  >> 0;
-      battery [1] = (voltage&0xff00)  >> 8;
-      battery [2] = (current&0x00ff)  >> 0;
-      battery [3] = (current&0xff00)  >> 8;
-      battery [4] = (charge&0x00ff)   >> 0;
-      battery [5] = (charge&0xff00)   >> 8;
-      battery [6] = (temp&0x00ff)     >> 0;
-      battery [7] = (temp&0xff00)     >> 8;
+
+      sendMsg.can_id = ADDR_BAT_1+i;
+      sendMsg.can_dlc = 8;
+      sendMsg.data[0] = (voltage&0x00ff)  >> 0;
+      sendMsg.data[1] = (voltage&0xff00)  >> 8;
+      sendMsg.data[2] = (current&0x00ff)  >> 0;
+      sendMsg.data[3] = (current&0xff00)  >> 8;
+      sendMsg.data[4] = (charge&0x00ff)   >> 0;
+      sendMsg.data[5] = (charge&0xff00)   >> 8;
+      sendMsg.data[6] = (temp&0x00ff)     >> 0;
+      sendMsg.data[7] = (temp&0xff00)     >> 8;
 
       battery_sn[i*2]   = (sn&0x00ff) >> 0;
       battery_sn[i*2+1] = (sn&0xff00) >> 8;
 
       detachInterrupt(digitalPinToInterrupt(SPI_INT));
-      CAN0.sendMsgBuf(ADDR_BAT_1+i, 0, 8, battery);
+      mcp2515.sendMessage(&sendMsg);
       attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
       if(digitalRead(SPI_INT) == LOW){mcpISR();}
       vTaskDelay(1);
       
       //delayMicroseconds(500);
     }
-    
-    byte data[1] = {0};
-    data[0] =  digitalRead(G_5V_MCU)     << 0
-             | digitalRead(G_12V_D455_3) << 1
-             | digitalRead(G_12V_D455_2) << 2
-             | digitalRead(G_12V_D455_1) << 3
-             | digitalRead(G_12V_PC)     << 4
-             | digitalRead(G_24V)        << 5;
+
+    sendMsg.can_id = ADDR_STAT;
+    sendMsg.can_dlc = 1;
+    sendMsg.data[0] = digitalRead(G_5V_MCU)     << 0
+                    | digitalRead(G_12V_D455_3) << 1
+                    | digitalRead(G_12V_D455_2) << 2
+                    | digitalRead(G_12V_D455_1) << 3
+                    | digitalRead(G_12V_PC)     << 4
+                    | digitalRead(G_24V)        << 5;
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(ADDR_STAT, 0, 1, data);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     vTaskDelay(1);
     //delayMicroseconds(500);
 
+    sendMsg.can_id = ADDR_BAT_SN;
+    sendMsg.can_dlc = 8;
+    sendMsg.data[0] = battery_sn[0];
+    sendMsg.data[1] = battery_sn[1];
+    sendMsg.data[2] = battery_sn[2];
+    sendMsg.data[3] = battery_sn[3];
+    sendMsg.data[4] = battery_sn[4];
+    sendMsg.data[5] = battery_sn[5];
+    sendMsg.data[6] = battery_sn[6];
+    sendMsg.data[7] = battery_sn[7];
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(ADDR_BAT_SN, 0, 8, battery_sn);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     
@@ -460,13 +467,13 @@ void setup()
   digitalWrite(LED_0, LOW);
   digitalWrite(LED_1, LOW);
 
-  CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
-
-  //for mass production model
-  CAN0.init_Mask(0,0,CAN_MASK);
-  CAN0.init_Filt(0,0,CAN_FILTER);
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
   
-  CAN0.setMode(MCP_NORMAL);
+  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK);
+  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER);
+
+  mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
 
   semaphoreSequence = xSemaphoreCreateBinary();
