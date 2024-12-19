@@ -23,9 +23,7 @@ CAN 0.3.1
 https://github.com/sandeepmistry/arduino-CAN  
 Dynamixel2Arduino 0.5.3  
 https://github.com/ROBOTIS-GIT/dynamixel2arduino  
-~MCP_CAN 1.5.1~  
-~https://github.com/coryjfowler/MCP_CAN_lib~  
-arduino-mcp2515  
+arduino-mcp2515 1.2.1  
 https://github.com/autowp/arduino-mcp2515  
 STM32FreeRTOS 10.3.2  
 https://github.com/stm32duino/STM32FreeRTOS  
