@@ -54,9 +54,11 @@
 #define ADDR_CAP_WR2    0x483
 #define ADDR_CAP_WR3    0x484
 
+//#define CAN_FILTER0     0x00900000
 #define CAN_FILTER0     0x00900000
 #define CAN_FILTER1     0x04800000
-#define CAN_MASK0       0x07f00000
+//#define CAN_MASK0       0x07f00000
+#define CAN_MASK0       0x07ff0000
 #define CAN_MASK1       0x07f80000
 
 MCP2515 mcp2515(SPI_CS_PIN);
@@ -108,48 +110,41 @@ const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
 void mcpISR(){
-  //Serial.println("isr");
-  //long unsigned int id;
-  //unsigned char len = 0;
-  //unsigned char buff[8];
   struct can_frame recvMsg;
-    
-  while(mcp2515.checkReceive() == true)
+  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
   {
-    if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
+    if(recvMsg.can_id == ADDR_VIB)
     {
-      if(recvMsg.can_id == ADDR_VIB)
-      {
-        buff_vib[0] = recvMsg.data[0];
-        buff_vib[1] = recvMsg.data[1];
-        buff_vib[2] = recvMsg.data[2];
+      buff_vib[0] = recvMsg.data[0];
+      buff_vib[1] = recvMsg.data[1];
+      buff_vib[2] = recvMsg.data[2];
         
-        vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
-        vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
-        vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
-      }
-      if(recvMsg.can_id == ADDR_SERVO_TGT)
+      vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
+      vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
+      vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
+    }
+    if(recvMsg.can_id == ADDR_SERVO_TGT)
+    {
+      if(servo_enable)
       {
-        if(servo_enable)
-        {
-          buff_tgt[0] = recvMsg.data[0];
-          buff_tgt[1] = recvMsg.data[1];
-          buff_tgt[2] = recvMsg.data[2];
-          buff_tgt[3] = recvMsg.data[3];
+        buff_tgt[0] = recvMsg.data[0];
+        buff_tgt[1] = recvMsg.data[1];
+        buff_tgt[2] = recvMsg.data[2];
+        buff_tgt[3] = recvMsg.data[3];
           
-          servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
-        }
+        servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
       }
-      if(recvMsg.can_id == ADDR_SERVO_EN)
+    }
+    if(recvMsg.can_id == ADDR_SERVO_EN)
+    {
+      if(servo_enable)
       {
-        if(servo_enable)
-        {
-          buff_en[0] = recvMsg.data[0];
-          onoff_recived = true;
-        }
+        buff_en[0] = recvMsg.data[0];
+        onoff_recived = true;
       }
     }
   }
+  mcp2515.clearInterrupts();
 }
 
 void task2ms(void *pvParameters)
