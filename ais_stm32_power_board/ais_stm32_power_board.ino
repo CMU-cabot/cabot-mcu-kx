@@ -39,25 +39,28 @@
 #define SMBUS_TEMP    0x08
 #define SMBUS_SERIAL  0x1c
 
-//for mass production model
-#define ADDR_EMS      0x100
-#define ADDR_STAT     0x101
-#define ADDR_IND      0x102
-#define ADDR_SEQ      0x103
-#define ADDR_ODRIVE   0x108
-#define ADDR_PC       0x109
-#define ADDR_D455_1   0x10a
-#define ADDR_D455_2   0x10b
-#define ADDR_D455_3   0x10c
-#define ADDR_MCU      0x10d
-#define ADDR_PWM      0x10e
-#define ADDR_BAT_1    0x518
-#define ADDR_BAT_2    0x519
-#define ADDR_BAT_3    0x51a
-#define ADDR_BAT_4    0x51b
-#define ADDR_BAT_SN   0x520
-#define CAN_FILTER    0x01080000
-#define CAN_MASK      0x07f80000
+//for prototype model
+#define ADDR_EMS      0x000
+#define ADDR_STAT     0x014
+#define ADDR_IND      0x003
+#define ADDR_SEQ      0x002
+#define ADDR_ODRIVE   0x015
+#define ADDR_PC       0x016
+#define ADDR_D455_1   0x017
+#define ADDR_D455_2   0x018
+#define ADDR_D455_3   0x019
+#define ADDR_MCU      0x01a
+#define ADDR_PWM      0x01e
+#define ADDR_BAT_1    0x005
+#define ADDR_BAT_2    0x006
+#define ADDR_BAT_3    0x007
+#define ADDR_BAT_4    0x008
+#define ADDR_BAT_SN   0x01d
+#define CAN_FILTER0   0x00140000
+#define CAN_FILTER1   0x00180000
+#define CAN_FILTER2   0x001e0000
+#define CAN_MASK0     0x07fc0000
+#define CAN_MASK1     0x07ff0000
 #define SHUTDOWN_PC   60000   //pc shutdown wait time[ms]
 #define SHUTDOWN_FRC  120000  //force shutdown time[ms]
 
@@ -469,9 +472,13 @@ void setup()
 
   mcp2515.reset();
   mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
-  
-  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK);
-  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER);
+
+  //for prototype model
+  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK0);
+  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER0);
+  mcp2515.setFilter(MCP2515::RXF1, false, CAN_FILTER1);
+  mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
+  mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER2);
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);

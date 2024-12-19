@@ -42,24 +42,24 @@
 #define VIB_DUTY                127 //0~255
 
 //for mass production model
-#define ADDR_TOFCAP     0x080
-#define ADDR_TACT       0x089
-#define ADDR_VIB        0x090
-#define ADDR_SERVO_EN   0x098
-#define ADDR_SERVO_TGT  0x099
-#define ADDR_SERVO_POS  0x09a
+#define ADDR_TOFCAP     0x012
+#define ADDR_TACT       0x013
+#define ADDR_VIB        0x01b
+#define ADDR_SERVO_EN   0x020
+#define ADDR_SERVO_TGT  0x01c
+#define ADDR_SERVO_POS  0x01f
+
 #define ADDR_CAP_BASE   0x480
 #define ADDR_CAP_STAT   0x481
 #define ADDR_CAP_WR1    0x482
 #define ADDR_CAP_WR2    0x483
 #define ADDR_CAP_WR3    0x484
 
-//#define CAN_FILTER0     0x00900000
-#define CAN_FILTER0     0x00900000
-#define CAN_FILTER1     0x04800000
-//#define CAN_MASK0       0x07f00000
+#define CAN_FILTER0     0x001b0000
+#define CAN_FILTER1     0x001c0000
+#define CAN_FILTER2     0x00200000
 #define CAN_MASK0       0x07ff0000
-#define CAN_MASK1       0x07f80000
+#define CAN_MASK1       0x07ff0000
 
 MCP2515 mcp2515(SPI_CS_PIN);
 HardwareSerial dxif(DXIF_RXD, DXIF_TXD);
@@ -110,40 +110,48 @@ const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
 void mcpISR(){
+  //Serial.println("isr");
+  //long unsigned int id;
+  //unsigned char len = 0;
+  //unsigned char buff[8];
   struct can_frame recvMsg;
-  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
-  {
-    if(recvMsg.can_id == ADDR_VIB)
+    
+  //while(mcp2515.checkReceive() == true)
+  //{
+    if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
     {
-      buff_vib[0] = recvMsg.data[0];
-      buff_vib[1] = recvMsg.data[1];
-      buff_vib[2] = recvMsg.data[2];
+      if(recvMsg.can_id == ADDR_VIB)
+      {
+        buff_vib[0] = recvMsg.data[0];
+        buff_vib[1] = recvMsg.data[1];
+        buff_vib[2] = recvMsg.data[2];
         
-      vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
-      vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
-      vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
-    }
-    if(recvMsg.can_id == ADDR_SERVO_TGT)
-    {
-      if(servo_enable)
+        vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
+        vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
+        vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
+      }
+      if(recvMsg.can_id == ADDR_SERVO_TGT)
       {
-        buff_tgt[0] = recvMsg.data[0];
-        buff_tgt[1] = recvMsg.data[1];
-        buff_tgt[2] = recvMsg.data[2];
-        buff_tgt[3] = recvMsg.data[3];
+        if(servo_enable)
+        {
+          buff_tgt[0] = recvMsg.data[0];
+          buff_tgt[1] = recvMsg.data[1];
+          buff_tgt[2] = recvMsg.data[2];
+          buff_tgt[3] = recvMsg.data[3];
           
-        servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
+          servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
+        }
       }
-    }
-    if(recvMsg.can_id == ADDR_SERVO_EN)
-    {
-      if(servo_enable)
+      if(recvMsg.can_id == ADDR_SERVO_EN)
       {
-        buff_en[0] = recvMsg.data[0];
-        onoff_recived = true;
+        if(servo_enable)
+        {
+          buff_en[0] = recvMsg.data[0];
+          onoff_recived = true;
+        }
       }
     }
-  }
+  //}
   mcp2515.clearInterrupts();
 }
 
@@ -419,9 +427,10 @@ void setup()
   
   mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK0);
   mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER0);
-
+  mcp2515.setFilter(MCP2515::RXF1, false, CAN_FILTER1);
+  
   mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
-  mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER1);
+  mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER2);
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
