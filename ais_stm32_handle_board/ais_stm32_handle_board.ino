@@ -42,24 +42,22 @@
 #define VIB_DUTY                127 //0~255
 
 //for mass production model
-#define ADDR_TOFCAP     0x080
-#define ADDR_TACT       0x089
-#define ADDR_VIB        0x090
-#define ADDR_SERVO_EN   0x098
-#define ADDR_SERVO_TGT  0x099
-#define ADDR_SERVO_POS  0x09a
-#define ADDR_CAP_BASE   0x480
-#define ADDR_CAP_STAT   0x481
-#define ADDR_CAP_WR1    0x482
-#define ADDR_CAP_WR2    0x483
-#define ADDR_CAP_WR3    0x484
+#define ADDR_TOFCAP     0x080       // 0b0 001 0000 000  ToF/Touch sensor data
+#define ADDR_TACT       0x089       // 0b0 001 0001 001  TACT SW data
+#define ADDR_VIB        0x090       // 0b0 001 0010 000  Vibrator command
+#define ADDR_SERVO_EN   0x098       // 0b0 001 0011 000  Servo enable/disable
+#define ADDR_SERVO_TGT  0x099       // 0b0 001 0011 001  Servor target position
+#define ADDR_SERVO_POS  0x09a       // 0b0 001 0011 010  Servo present position
+#define ADDR_CAP_BASE   0x480       // 0b1 001 0000 000  CAP1203 Debug base address
+#define ADDR_CAP_STAT   0x481       // 0b1 001 0000 001  CAP1203 Debug sensor status
+#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1
+#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2
+#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3
 
-//#define CAN_FILTER0     0x00900000
-#define CAN_FILTER0     0x00900000
-#define CAN_FILTER1     0x04800000
-//#define CAN_MASK0       0x07f00000
-#define CAN_MASK0       0x07ff0000
-#define CAN_MASK1       0x07f80000
+#define CAN_FILTER0     0x00900000  // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
+#define CAN_FILTER1     0x04800000  // 0b1 001 0000 000 filter for ADDR_CAP_WR*
+#define CAN_MASK0       0x07f00000  // 0b1 111 1110 000 mask by priority, major, minor (upper 3bit)
+#define CAN_MASK1       0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
 
 MCP2515 mcp2515(SPI_CS_PIN);
 HardwareSerial dxif(DXIF_RXD, DXIF_TXD);
@@ -110,40 +108,48 @@ const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
 void mcpISR(){
+  //Serial.println("isr");
+  //long unsigned int id;
+  //unsigned char len = 0;
+  //unsigned char buff[8];
   struct can_frame recvMsg;
-  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
-  {
-    if(recvMsg.can_id == ADDR_VIB)
+    
+  //while(mcp2515.checkReceive() == true)
+  //{
+    if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
     {
-      buff_vib[0] = recvMsg.data[0];
-      buff_vib[1] = recvMsg.data[1];
-      buff_vib[2] = recvMsg.data[2];
+      if(recvMsg.can_id == ADDR_VIB)
+      {
+        buff_vib[0] = recvMsg.data[0];
+        buff_vib[1] = recvMsg.data[1];
+        buff_vib[2] = recvMsg.data[2];
         
-      vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
-      vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
-      vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
-    }
-    if(recvMsg.can_id == ADDR_SERVO_TGT)
-    {
-      if(servo_enable)
+        vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
+        vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
+        vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
+      }
+      if(recvMsg.can_id == ADDR_SERVO_TGT)
       {
-        buff_tgt[0] = recvMsg.data[0];
-        buff_tgt[1] = recvMsg.data[1];
-        buff_tgt[2] = recvMsg.data[2];
-        buff_tgt[3] = recvMsg.data[3];
+        if(servo_enable)
+        {
+          buff_tgt[0] = recvMsg.data[0];
+          buff_tgt[1] = recvMsg.data[1];
+          buff_tgt[2] = recvMsg.data[2];
+          buff_tgt[3] = recvMsg.data[3];
           
-        servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
+          servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
+        }
       }
-    }
-    if(recvMsg.can_id == ADDR_SERVO_EN)
-    {
-      if(servo_enable)
+      if(recvMsg.can_id == ADDR_SERVO_EN)
       {
-        buff_en[0] = recvMsg.data[0];
-        onoff_recived = true;
+        if(servo_enable)
+        {
+          buff_en[0] = recvMsg.data[0];
+          onoff_recived = true;
+        }
       }
     }
-  }
+  //}
   mcp2515.clearInterrupts();
 }
 

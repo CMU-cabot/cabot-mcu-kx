@@ -20,26 +20,26 @@
 #define BME_RST       32
 #define BNO_RST       14
 
-#define ADDR_IMU_ACC  0x010
-#define ADDR_IMU_ANG  0x011
-#define ADDR_IMU_ORI  0x012
-#define ADDR_BME      0x018
-#define ADDR_IMU_CAL  0x430
-#define ADDR_IMU_WR0  0x431
-#define ADDR_IMU_WR1  0x432
-#define ADDR_IMU_WR2  0x433
-#define ADDR_IMU_STAT 0x438
-#define ADDR_IMU_RE0  0x439
-#define ADDR_IMU_RE1  0x43a
-#define ADDR_IMU_RE2  0x43b
-#define ADDR_WIFI0    0x428
-#define ADDR_WIFI1    0x429
-#define ADDR_WIFI2    0x42a
-#define ADDR_WIFI3    0x42b
-#define ADDR_WIFI4    0x42c
+#define ADDR_IMU_ACC  0x010   // 0b0 000 0010 000  IMU acceleration
+#define ADDR_IMU_ANG  0x011   // 0b0 000 0010 001  IMU angular velocity 
+#define ADDR_IMU_ORI  0x012   // 0b0 000 0010 010  IMU orientation
+#define ADDR_BME      0x018   // 0b0 000 0011 000  BME280 temperature / humidity / pressure
+#define ADDR_IMU_CAL  0x430   // 0b1 000 0110 000  IMU SensorOffsets read/write command
+#define ADDR_IMU_WR0  0x431   // 0b1 000 0110 001  IMU SensorOffsets data write 0 ~ 7 Byte
+#define ADDR_IMU_WR1  0x432   // 0b1 000 0110 010  IMU SensorOffsets data write8 ~ 15 Byte
+#define ADDR_IMU_WR2  0x433   // 0b1 000 0110 011  IMU SensorOffsets data write16 ~ 21 Byte
+#define ADDR_IMU_STAT 0x438   // 0b1 000 0111 000  IMU Calibration status system/gyro/accel/mag
+#define ADDR_IMU_RE0  0x439   // 0b1 000 0111 001  IMU SensorOffsets data read 0 ~ 7 Byte
+#define ADDR_IMU_RE1  0x43a   // 0b1 000 0111 010  IMU SensorOffsets data read 8 ~ 15 Byte
+#define ADDR_IMU_RE2  0x43b   // 0b1 000 0111 011  IMU SensorOffsets data read 16 ~ 21 Byte
+#define ADDR_WIFI0    0x428   // 0b1 000 0101 000  WIFI data ssid 0 ~ 7 Byte
+#define ADDR_WIFI1    0x429   // 0b1 000 0101 001  WIFI data ssid 8 ~ 15 Byte
+#define ADDR_WIFI2    0x42a   // 0b1 000 0101 010  WIFI data ssid 16 ~ 23 Byte
+#define ADDR_WIFI3    0x42b   // 0b1 000 0101 011  WIFI data ssid 24 ~ 31 Byte
+#define ADDR_WIFI4    0x42c   // 0b1 000 0101 100  WIFI data bssid / ch / rssi
 
-#define CAN_FILTER    0x430
-#define CAN_MASK      0x7f8
+#define CAN_FILTER    0x430  // 0b1 000 0110 000  filter for ADDR_IMU_CAL ~ ADDR_IMU_WR2 (major=0, minor=6)
+#define CAN_MASK      0x7f8  // 0b1 111 1111 000  mask by priority, major, minor
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 
@@ -248,7 +248,7 @@ void setup() {
   
   // start the CAN bus at 1Mbps
   while(!CAN.begin(1000E3)) {
-    delay(10);
+    delay(10);  //Retry interval adjust
   }
 
   CAN.filter(CAN_FILTER, CAN_MASK);

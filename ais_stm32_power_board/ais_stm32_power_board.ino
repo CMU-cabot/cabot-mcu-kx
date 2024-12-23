@@ -15,6 +15,8 @@
 #define G_12V_D455_3  PB0
 #define G_5V_MCU      PA8
 #define PWM_FAN       PB1
+//On the prototype board, "PC_ENABLE" is assigned to the resetSW(SW2).
+//To simulate a PC shutdown, press resetSW.
 #define PC_ENABLE     PA2
 #define MUX_RST       PA5
 
@@ -30,36 +32,36 @@
 #define STM32_TXD     PA9
 #define STM32_RXD     PA10
 
-#define SMBUS_BATT    0x0b
-#define SMBUS_MUX     0x70
+#define SMBUS_BATT    0x0b    // Battry adderess
+#define SMBUS_MUX     0x70    // Multiplexer address
 
-#define SMBUS_VOLTAGE 0x09
-#define SMBUS_CULLENT 0x0a
-#define SMBUS_CHARGE  0x0d 
-#define SMBUS_TEMP    0x08
-#define SMBUS_SERIAL  0x1c
+#define SMBUS_VOLTAGE 0x09    // SMBUS battery voltage address
+#define SMBUS_CULLENT 0x0a    // SMBUS battery current address
+#define SMBUS_CHARGE  0x0d    // SMBUS battery remaining capacity address
+#define SMBUS_TEMP    0x08    // SMBUS battery temperature address
+#define SMBUS_SERIAL  0x1c    // SMBUS battery serial No. address
 
 //for mass production model
-#define ADDR_EMS      0x100
-#define ADDR_STAT     0x101
-#define ADDR_IND      0x102
-#define ADDR_SEQ      0x103
-#define ADDR_ODRIVE   0x108
-#define ADDR_PC       0x109
-#define ADDR_D455_1   0x10a
-#define ADDR_D455_2   0x10b
-#define ADDR_D455_3   0x10c
-#define ADDR_MCU      0x10d
-#define ADDR_PWM      0x10e
-#define ADDR_BAT_1    0x518
-#define ADDR_BAT_2    0x519
-#define ADDR_BAT_3    0x51a
-#define ADDR_BAT_4    0x51b
-#define ADDR_BAT_SN   0x520
-#define CAN_FILTER    0x01080000
-#define CAN_MASK      0x07f80000
-#define SHUTDOWN_PC   60000   //pc shutdown wait time[ms]
-#define SHUTDOWN_FRC  120000  //force shutdown time[ms]
+#define ADDR_EMS      0x100   // 0b0 010 0000 000  Emergency stop
+#define ADDR_STAT     0x101   // 0b0 010 0000 001  Power board status
+#define ADDR_IND      0x102   // 0b0 010 0000 010  Power board indicator
+#define ADDR_SEQ      0x103   // 0b0 010 0000 011  Power board sequence status
+#define ADDR_ODRIVE   0x108   // 0b0 010 0001 000  +24V_Odrive control
+#define ADDR_PC       0x109   // 0b0 010 0001 001  +12_PC control(poweron/shutdown sequence control)
+#define ADDR_D455_1   0x10a   // 0b0 010 0001 010  +12V_D455_1 control
+#define ADDR_D455_2   0x10b   // 0b0 010 0001 011  +12V_D455_2 control
+#define ADDR_D455_3   0x10c   // 0b0 010 0001 100  +12V_D455_3 control
+#define ADDR_MCU      0x10d   // 0b0 010 0001 101  +5V_MCU control
+#define ADDR_PWM      0x10e   // 0b0 010 0001 110  FAN pwm control
+#define ADDR_BAT_1    0x518   // 0b1 010 0011 000  Battery1 status
+#define ADDR_BAT_2    0x519   // 0b1 010 0011 001  Battery2 status
+#define ADDR_BAT_3    0x51a   // 0b1 010 0011 010  Battery3 status
+#define ADDR_BAT_4    0x51b   // 0b1 010 0011 011  Battery4 status
+#define ADDR_BAT_SN   0x520   // 0b1 010 0100 000  Battery serial No.
+#define CAN_FILTER    0x01080000  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
+#define CAN_MASK      0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
+#define SHUTDOWN_PC   60000   // pc shutdown wait time[ms](Not used)
+#define SHUTDOWN_FRC  120000  // force shutdown time[ms]
 
 MCP2515 mcp2515(SPI_CS_PIN);
 

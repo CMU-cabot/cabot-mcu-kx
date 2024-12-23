@@ -123,13 +123,9 @@ void setup()
 
   mcp2515.reset();
   mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
-  //mcp2515.setFilterMask(MCP2515::MASK0, false, 0x07ff0000);
-  //mcp2515.setFilter(MCP2515::RXF0, false, 0x00000000);
+  mcp2515.setFilterMask(MCP2515::MASK0, false, 0x07ff0000);
+  mcp2515.setFilter(MCP2515::RXF0, false, 0x00000000);
   mcp2515.setNormalMode();
-  //CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
-  //CAN0.init_Mask(0,0,0x07ff0000);
-  //CAN0.init_Filt(0,0,0x00000000);
-  //CAN0.setMode(MCP_NORMAL);
   pinMode(SPI_INT, INPUT);
 
   xTaskCreate(task_measure,  "task_measure",  configMINIMAL_STACK_SIZE, NULL, 10,  NULL);
