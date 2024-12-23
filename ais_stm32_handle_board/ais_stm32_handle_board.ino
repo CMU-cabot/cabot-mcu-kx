@@ -1,5 +1,5 @@
 #include <STM32FreeRTOS.h>
-#include <mcp_can.h>
+#include <mcp2515.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Dynamixel2Arduino.h>
@@ -54,12 +54,14 @@
 #define ADDR_CAP_WR2    0x483
 #define ADDR_CAP_WR3    0x484
 
+//#define CAN_FILTER0     0x00900000
 #define CAN_FILTER0     0x00900000
 #define CAN_FILTER1     0x04800000
-#define CAN_MASK0       0x07f00000
+//#define CAN_MASK0       0x07f00000
+#define CAN_MASK0       0x07ff0000
 #define CAN_MASK1       0x07f80000
 
-MCP_CAN CAN0(SPI_CS_PIN);
+MCP2515 mcp2515(SPI_CS_PIN);
 HardwareSerial dxif(DXIF_RXD, DXIF_TXD);
 Dynamixel2Arduino dxl(dxif, DXIF_DIR);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
@@ -108,41 +110,41 @@ const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
 void mcpISR(){
-  //Serial.println("isr");
-  long unsigned int id;
-  unsigned char len = 0;
-  unsigned char buff[8];
-    
-  while(CAN0.checkReceive()==CAN_MSGAVAIL)
+  struct can_frame recvMsg;
+  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
   {
-    CAN0.readMsgBuf(&id, &len, buff);
-  
-    if((id & 0x80000000) == 0x80000000){return;}
-
-    if(id == ADDR_VIB)
+    if(recvMsg.can_id == ADDR_VIB)
     {
-      memcpy((unsigned char *)buff_vib, buff, 3);
+      buff_vib[0] = recvMsg.data[0];
+      buff_vib[1] = recvMsg.data[1];
+      buff_vib[2] = recvMsg.data[2];
+        
       vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
       vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
       vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
     }
-    if(id == ADDR_SERVO_TGT)
+    if(recvMsg.can_id == ADDR_SERVO_TGT)
     {
       if(servo_enable)
       {
-        memcpy((unsigned char *)buff_tgt, buff, 4);
+        buff_tgt[0] = recvMsg.data[0];
+        buff_tgt[1] = recvMsg.data[1];
+        buff_tgt[2] = recvMsg.data[2];
+        buff_tgt[3] = recvMsg.data[3];
+          
         servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
       }
     }
-    if(id == ADDR_SERVO_EN)
+    if(recvMsg.can_id == ADDR_SERVO_EN)
     {
       if(servo_enable)
       {
-        memcpy((unsigned char *)buff_en, buff, 1);
+        buff_en[0] = recvMsg.data[0];
         onoff_recived = true;
       }
     }
   }
+  mcp2515.clearInterrupts();
 }
 
 void task2ms(void *pvParameters)
@@ -273,24 +275,29 @@ void task20ms(void *pvParameters)
   {
     //Serial.println("20ms");
     //taskENTER_CRITICAL();
+    struct can_frame sendMsg;
     uint16_t tof;
     tof = lox.readRangeResult();
-    data_tofcap[0] = (tof & 0x00ff) >> 0;
-    data_tofcap[1] = (tof & 0xff00) >> 8;
-    data_tofcap[2] = cap_sens.getSensorInput1DeltaCountReg();
-    data_tofcap[3] = cap_sens.getSensorInputStatusReg();
+    sendMsg.can_id = ADDR_TOFCAP;
+    sendMsg.can_dlc = 4;
+    sendMsg.data[0] = (tof & 0x00ff) >> 0;
+    sendMsg.data[1] = (tof & 0xff00) >> 8;
+    sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
+    sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
     cap_sens.setMainControlReg(false, false, false);
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(ADDR_TOFCAP, 0, 4, data_tofcap);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
 
-    data_capstat[0] = cap_sens.getGeneralStatusReg();
-    data_capstat[1] = cap_sens.getNoiseFlagStatsReg();
-    data_capstat[2] = cap_sens.getCalibrationStatusReg();
+    sendMsg.can_id = ADDR_CAP_STAT;
+    sendMsg.can_dlc = 3;
+    sendMsg.data[0] = cap_sens.getGeneralStatusReg();
+    sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
+    sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(ADDR_CAP_STAT, 0, 3, data_capstat);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
@@ -300,8 +307,12 @@ void task20ms(void *pvParameters)
                  | sw_up    << 2
                  | sw_down  << 3;
     data_tact[0] = (data_tact[0])&0x0f;
+    
+    sendMsg.can_id = ADDR_TACT;
+    sendMsg.can_dlc = 1;
+    sendMsg.data[0] = data_tact[0];
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(ADDR_TACT, 0, 1, data_tact);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
@@ -329,12 +340,14 @@ void task20ms(void *pvParameters)
       //dxl.read(DXL_ID, PRESENT_POSITION_ADDR, 4, (uint8_t*)&angle, , TIMEOUT);
       uint32_t angle = dxl.getPresentPosition(DXL_ID);
       
-      data_pos[0] = (angle & 0x000000ff) >> 0;
-      data_pos[1] = (angle & 0x0000ff00) >> 8;
-      data_pos[2] = (angle & 0x00ff0000) >> 16;
-      data_pos[3] = (angle & 0xff000000) >> 24;
+      sendMsg.can_id = ADDR_SERVO_POS;
+      sendMsg.can_dlc = 4;
+      sendMsg.data[0] = (angle & 0x000000ff) >> 0;
+      sendMsg.data[1] = (angle & 0x0000ff00) >> 8;
+      sendMsg.data[2] = (angle & 0x00ff0000) >> 16;
+      sendMsg.data[3] = (angle & 0xff000000) >> 24;
       detachInterrupt(digitalPinToInterrupt(SPI_INT));
-      CAN0.sendMsgBuf(ADDR_SERVO_POS, 0, 4, data_pos);
+      mcp2515.sendMessage(&sendMsg);
       attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
       if(digitalRead(SPI_INT) == LOW){mcpISR();}
     }
@@ -401,16 +414,17 @@ void setup()
   cap_sens.begin();
   cap_sens.setSensitivityControlReg(BASE_DEF, DELTA_4X);
 
-  CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
-  //for mass production model
-  CAN0.init_Mask(0,0,CAN_MASK0);
-  CAN0.init_Filt(0,0,CAN_FILTER0);
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
   
-  CAN0.init_Mask(1,0,CAN_MASK1);
-  CAN0.init_Filt(2,0,CAN_FILTER1);
-  
+  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK0);
+  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER0);
+
+  mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
+  mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER1);
+
+  mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
-  CAN0.setMode(MCP_NORMAL);
   Serial.println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
 
