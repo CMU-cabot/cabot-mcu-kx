@@ -33,11 +33,17 @@
 #define ADDR_SENSOR_INPUT_2_DELTA_COUNT     0x11
 #define ADDR_SENSOR_INPUT_3_DELTA_COUNT     0x12
 #define ADDR_SENSITIVITY_CONTROL            0x1F
+#define ADDR_CONFIGURATION                  0x20
+#define ADDR_SENSOR_INPUT_ENABLE            0x21
 #define ADDR_CALIBREATION_STATUS            0x26
 #define ADDR_INTERRUPT_ENABLE               0x27
 #define ADDR_RECALIBRATION_CONFIGURATION    0x2F
+#define ADDR_CONFIGURATION2                 0x44
 
 #define RC_NEG_DELTA_MASK                   0x18
+#define DIS_ANA_NOISE_MASK                  0x10
+#define BC_OUT_RECAL_MASK                   0x40
+
 
 class cap1203
 {
@@ -51,6 +57,9 @@ class cap1203
         void setInterruptEnableReg(bool _cs1_int_en, bool _cs2_int_en, bool _cs3_int_en);
         void setCalibrationStatusReg(uint8_t status);
         void setNegativeDeltaCountReg(uint8_t status);
+        void setSensorInputEnableReg(uint8_t status);
+        void setConfigurationReg(uint8_t status);
+        void setConfiguration2Reg(uint8_t status);
 
         uint8_t getMainControlReg();
         uint8_t getGeneralStatusReg();

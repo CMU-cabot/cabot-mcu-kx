@@ -50,9 +50,11 @@
 #define ADDR_SERVO_POS  0x09a       // 0b0 001 0011 010  Servo present position
 #define ADDR_CAP_BASE   0x480       // 0b1 001 0000 000  CAP1203 Debug base address
 #define ADDR_CAP_STAT   0x481       // 0b1 001 0000 001  CAP1203 Debug sensor status
-#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1
-#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2
-#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3
+#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1 (setCalibrationStatusReg)
+#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2 (setNegativeDeltaCountReg)
+#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3 (setSensorInputEnableReg)
+#define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
+#define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
 
 #define CAN_FILTER0     0x00900000  // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
 #define CAN_FILTER1     0x04800000  // 0b1 001 0000 000 filter for ADDR_CAP_WR*
@@ -68,6 +70,11 @@ cap1203 cap_sens(&Wire);
 volatile unsigned char buff_vib[3];
 volatile unsigned char buff_tgt[4];
 volatile unsigned char buff_en[1];
+volatile unsigned char buff_wr1[1];
+volatile unsigned char buff_wr2[1];
+volatile unsigned char buff_wr3[1];
+volatile unsigned char buff_wr4[1];
+volatile unsigned char buff_wr5[1];
 
 byte data_tofcap[4] = {0};
 byte data_tact[1] = {0}; 
@@ -147,6 +154,36 @@ void mcpISR(){
           buff_en[0] = recvMsg.data[0];
           onoff_recived = true;
         }
+      }
+      
+      if(recvMsg.can_id == ADDR_CAP_WR1)
+      {
+        buff_wr1[0] = recvMsg.data[0];
+        cap_sens.setCalibrationStatusReg(buff_wr1[0]);
+      }
+      
+      if(recvMsg.can_id == ADDR_CAP_WR2)
+      {
+        buff_wr2[0] = recvMsg.data[0];
+        cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
+      }
+      
+      if(recvMsg.can_id == ADDR_CAP_WR3)
+      {
+        buff_wr3[0] = recvMsg.data[0];
+        cap_sens.setSensorInputEnableReg(buff_wr3[0]);
+      }
+
+      if(recvMsg.can_id == ADDR_CAP_WR4)
+      {
+        buff_wr4[0] = recvMsg.data[0];
+        cap_sens.setConfigurationReg(buff_wr4[0]);
+      }
+
+      if(recvMsg.can_id == ADDR_CAP_WR5)
+      {
+        buff_wr5[0] = recvMsg.data[0];
+        cap_sens.setConfiguration2Reg(buff_wr5[0]);
       }
     }
   //}
