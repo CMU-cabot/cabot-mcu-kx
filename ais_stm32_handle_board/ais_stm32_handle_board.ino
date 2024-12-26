@@ -419,6 +419,8 @@ void setup()
   pinMode(SW_UP, INPUT);
   pinMode(SW_DOWN, INPUT);
   pinMode(VIB_0, OUTPUT);
+  pinMode(VIB_1, OUTPUT);
+  pinMode(VIB_2, OUTPUT);
   pinMode(CAP_RST, OUTPUT);
   pinMode(MCP_RST, OUTPUT);
 
