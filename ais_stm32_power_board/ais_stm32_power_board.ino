@@ -324,7 +324,6 @@ void task_send(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
-    //taskENTER_CRITICAL();
     Serial.println("send");
     struct can_frame sendMsg;
     sendMsg.can_id = ADDR_IND;
@@ -336,7 +335,6 @@ void task_send(void *pvParameters)
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     vTaskDelay(1);
-    //delayMicroseconds(500);
 
     uint16_t voltage  = 0;
     uint16_t current  = 0;
@@ -391,7 +389,6 @@ void task_send(void *pvParameters)
       if(digitalRead(SPI_INT) == LOW){mcpISR();}
       vTaskDelay(1);
       
-      //delayMicroseconds(500);
     }
 
     sendMsg.can_id = ADDR_STAT;
@@ -407,7 +404,6 @@ void task_send(void *pvParameters)
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     vTaskDelay(1);
-    //delayMicroseconds(500);
 
     sendMsg.can_id = ADDR_BAT_SN;
     sendMsg.can_dlc = 8;
@@ -424,7 +420,6 @@ void task_send(void *pvParameters)
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     
-    //taskEXIT_CRITICAL();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -484,10 +479,6 @@ void setup()
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
 
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR,       FALLING);
-  //attachInterrupt(digitalPinToInterrupt(SW_EW),   &emergencyISR, FALLING);
-  //attachInterrupt(digitalPinToInterrupt(SW_0),    &poweronISR,   FALLING);
-  //attachInterrupt(digitalPinToInterrupt(SW_1),    &shutdownISR,  FALLING);
-  //attachInterrupt(digitalPinToInterrupt(SW_2),    &rebootISR,    FALLING);
   vTaskStartScheduler(); 
 }
 
@@ -532,10 +523,6 @@ void loop()
   {
     shutdown_cnt = 0;
   }
-  
-  //Serial.println(poweron_cnt);
-  //Serial.println(shutdown_cnt);
-  //Serial.println(reboot_cnt);
   
   delay(1);
 }

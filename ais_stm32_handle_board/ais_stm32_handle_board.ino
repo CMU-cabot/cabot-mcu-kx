@@ -50,9 +50,11 @@
 #define ADDR_SERVO_POS  0x09a       // 0b0 001 0011 010  Servo present position
 #define ADDR_CAP_BASE   0x480       // 0b1 001 0000 000  CAP1203 Debug base address
 #define ADDR_CAP_STAT   0x481       // 0b1 001 0000 001  CAP1203 Debug sensor status
-#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1
-#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2
-#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3
+#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1 (setCalibrationStatusReg)
+#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2 (setNegativeDeltaCountReg)
+#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3 (setSensorInputEnableReg)
+#define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
+#define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
 
 #define CAN_FILTER0     0x00900000  // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
 #define CAN_FILTER1     0x04800000  // 0b1 001 0000 000 filter for ADDR_CAP_WR*
@@ -68,6 +70,11 @@ cap1203 cap_sens(&Wire);
 volatile unsigned char buff_vib[3];
 volatile unsigned char buff_tgt[4];
 volatile unsigned char buff_en[1];
+volatile unsigned char buff_wr1[1];
+volatile unsigned char buff_wr2[1];
+volatile unsigned char buff_wr3[1];
+volatile unsigned char buff_wr4[1];
+volatile unsigned char buff_wr5[1];
 
 byte data_tofcap[4] = {0};
 byte data_tact[1] = {0}; 
@@ -108,48 +115,71 @@ const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
 void mcpISR(){
-  //Serial.println("isr");
-  //long unsigned int id;
-  //unsigned char len = 0;
-  //unsigned char buff[8];
   struct can_frame recvMsg;
     
-  //while(mcp2515.checkReceive() == true)
-  //{
-    if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
+  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
+  {
+    if(recvMsg.can_id == ADDR_VIB)
     {
-      if(recvMsg.can_id == ADDR_VIB)
-      {
-        buff_vib[0] = recvMsg.data[0];
-        buff_vib[1] = recvMsg.data[1];
-        buff_vib[2] = recvMsg.data[2];
+      buff_vib[0] = recvMsg.data[0];
+      buff_vib[1] = recvMsg.data[1];
+      buff_vib[2] = recvMsg.data[2];
         
-        vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
-        vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
-        vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
-      }
-      if(recvMsg.can_id == ADDR_SERVO_TGT)
+      vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
+      vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
+      vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
+    }
+    if(recvMsg.can_id == ADDR_SERVO_TGT)
+    {
+      if(servo_enable)
       {
-        if(servo_enable)
-        {
-          buff_tgt[0] = recvMsg.data[0];
-          buff_tgt[1] = recvMsg.data[1];
-          buff_tgt[2] = recvMsg.data[2];
-          buff_tgt[3] = recvMsg.data[3];
+        buff_tgt[0] = recvMsg.data[0];
+        buff_tgt[1] = recvMsg.data[1];
+        buff_tgt[2] = recvMsg.data[2];
+        buff_tgt[3] = recvMsg.data[3];
           
-          servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
-        }
-      }
-      if(recvMsg.can_id == ADDR_SERVO_EN)
-      {
-        if(servo_enable)
-        {
-          buff_en[0] = recvMsg.data[0];
-          onoff_recived = true;
-        }
+        servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
       }
     }
-  //}
+    if(recvMsg.can_id == ADDR_SERVO_EN)
+    {
+      if(servo_enable)
+      {
+        buff_en[0] = recvMsg.data[0];
+        onoff_recived = true;
+      }
+    }
+      
+    if(recvMsg.can_id == ADDR_CAP_WR1)
+    {
+      buff_wr1[0] = recvMsg.data[0];
+      cap_sens.setCalibrationStatusReg(buff_wr1[0]);
+    }
+      
+    if(recvMsg.can_id == ADDR_CAP_WR2)
+    {
+      buff_wr2[0] = recvMsg.data[0];
+      cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
+    }
+      
+    if(recvMsg.can_id == ADDR_CAP_WR3)
+    {
+      buff_wr3[0] = recvMsg.data[0];
+      cap_sens.setSensorInputEnableReg(buff_wr3[0]);
+    }
+
+    if(recvMsg.can_id == ADDR_CAP_WR4)
+    {
+      buff_wr4[0] = recvMsg.data[0];
+      cap_sens.setConfigurationReg(buff_wr4[0]);
+    }
+
+    if(recvMsg.can_id == ADDR_CAP_WR5)
+    {
+      buff_wr5[0] = recvMsg.data[0];
+      cap_sens.setConfiguration2Reg(buff_wr5[0]);
+    }
+  }
   mcp2515.clearInterrupts();
 }
 
@@ -260,7 +290,6 @@ void task10ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
-    //Serial.println("10ms");
     if(vib0_count>0){digitalWrite(VIB_0, HIGH);vib0_count--;}
     else{digitalWrite(VIB_0, LOW);}
     if(vib1_count>0){digitalWrite(VIB_1, HIGH);vib1_count--;}
@@ -279,8 +308,6 @@ void task20ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
-    //Serial.println("20ms");
-    //taskENTER_CRITICAL();
     struct can_frame sendMsg;
     uint16_t tof;
     tof = lox.readRangeResult();
@@ -340,10 +367,8 @@ void task20ms(void *pvParameters)
         onoff_recived == false;
       }
       
-      //dxl.write(DXL_ID, GOAL_POSITION_ADDR, (uint8_t*)&servo_angle, 4, TIMEOUT);
       dxl.setGoalPosition(DXL_ID, servo_angle);
       delayMicroseconds(500);
-      //dxl.read(DXL_ID, PRESENT_POSITION_ADDR, 4, (uint8_t*)&angle, , TIMEOUT);
       uint32_t angle = dxl.getPresentPosition(DXL_ID);
       
       sendMsg.can_id = ADDR_SERVO_POS;
@@ -357,7 +382,6 @@ void task20ms(void *pvParameters)
       attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
       if(digitalRead(SPI_INT) == LOW){mcpISR();}
     }
-    //taskEXIT_CRITICAL();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -382,6 +406,8 @@ void setup()
   pinMode(SW_UP, INPUT);
   pinMode(SW_DOWN, INPUT);
   pinMode(VIB_0, OUTPUT);
+  pinMode(VIB_1, OUTPUT);
+  pinMode(VIB_2, OUTPUT);
   pinMode(CAP_RST, OUTPUT);
   pinMode(MCP_RST, OUTPUT);
 

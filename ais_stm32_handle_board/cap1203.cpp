@@ -64,6 +64,26 @@ void cap1203::setNegativeDeltaCountReg(uint8_t status) {
     cap1203::writeReg(ADDR_RECALIBRATION_CONFIGURATION, data, 1);
 }
 
+void cap1203::setSensorInputEnableReg(uint8_t status) {
+    uint8_t data[1];
+    data[0] = status;
+    cap1203::writeReg(ADDR_SENSOR_INPUT_ENABLE, data, 1);
+}
+
+void cap1203::setConfigurationReg(uint8_t status) {
+    uint8_t data[1];
+    cap1203::readReg(ADDR_CONFIGURATION, data, 1);
+    data[0] = (data[0] & ~ DIS_ANA_NOISE_MASK) | (status & DIS_ANA_NOISE_MASK);
+    cap1203::writeReg(ADDR_CONFIGURATION, data, 1);
+}
+
+void cap1203::setConfiguration2Reg(uint8_t status) {
+  uint8_t data[1];
+    cap1203::readReg(ADDR_CONFIGURATION2, data, 1);
+    data[0] = (data[0] & ~ BC_OUT_RECAL_MASK) | (status & BC_OUT_RECAL_MASK);
+    cap1203::writeReg(ADDR_CONFIGURATION2, data, 1);
+}
+
 uint8_t cap1203::getMainControlReg()
 {
     uint8_t data[1];

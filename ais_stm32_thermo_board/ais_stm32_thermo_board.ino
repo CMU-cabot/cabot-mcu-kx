@@ -52,7 +52,6 @@ void mcpISR(){
   long unsigned int id;
   unsigned char len = 0;
   unsigned char buff[8];
-  //CAN0.readMsgBuf(&id, &len, buff);
 }
 
 void task_measure(void *pvParameters)
