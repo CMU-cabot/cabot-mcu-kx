@@ -50,6 +50,40 @@ void cap1203::setInterruptEnableReg(bool _cs1_int_en, bool _cs2_int_en, bool _cs
     cap1203::writeReg(ADDR_INTERRUPT_ENABLE, data, 1);
 }
 
+void cap1203::setCalibrationStatusReg(uint8_t status)
+{
+    uint8_t data[1];
+    data[0] = status;
+    cap1203::writeReg(ADDR_CALIBREATION_STATUS, data, 1);
+}
+
+void cap1203::setNegativeDeltaCountReg(uint8_t status) {
+    uint8_t data[1];
+    cap1203::readReg(ADDR_RECALIBRATION_CONFIGURATION, data, 1);
+    data[0] = (data[0] & ~ RC_NEG_DELTA_MASK) | (status & RC_NEG_DELTA_MASK);
+    cap1203::writeReg(ADDR_RECALIBRATION_CONFIGURATION, data, 1);
+}
+
+void cap1203::setSensorInputEnableReg(uint8_t status) {
+    uint8_t data[1];
+    data[0] = status;
+    cap1203::writeReg(ADDR_SENSOR_INPUT_ENABLE, data, 1);
+}
+
+void cap1203::setConfigurationReg(uint8_t status) {
+    uint8_t data[1];
+    cap1203::readReg(ADDR_CONFIGURATION, data, 1);
+    data[0] = (data[0] & ~ DIS_ANA_NOISE_MASK) | (status & DIS_ANA_NOISE_MASK);
+    cap1203::writeReg(ADDR_CONFIGURATION, data, 1);
+}
+
+void cap1203::setConfiguration2Reg(uint8_t status) {
+  uint8_t data[1];
+    cap1203::readReg(ADDR_CONFIGURATION2, data, 1);
+    data[0] = (data[0] & ~ BC_OUT_RECAL_MASK) | (status & BC_OUT_RECAL_MASK);
+    cap1203::writeReg(ADDR_CONFIGURATION2, data, 1);
+}
+
 uint8_t cap1203::getMainControlReg()
 {
     uint8_t data[1];
@@ -103,6 +137,20 @@ uint8_t cap1203::getInterruptEnableReg()
 {
     uint8_t data[1];
     cap1203::readReg(ADDR_INTERRUPT_ENABLE, data, 1);
+    return data[0];
+}
+
+uint8_t cap1203::getNoiseFlagStatsReg()
+{
+    uint8_t data[1];
+    cap1203::readReg(ADDR_NOISE_FLAG_STATUS, data, 1);
+    return data[0];
+}
+
+uint8_t cap1203::getCalibrationStatusReg()
+{
+    uint8_t data[1];
+    cap1203::readReg(ADDR_CALIBREATION_STATUS, data, 1);
     return data[0];
 }
 

@@ -1,5 +1,5 @@
 #include <STM32FreeRTOS.h>
-#include <mcp_can.h>
+#include <mcp2515.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Dynamixel2Arduino.h>
@@ -41,19 +41,45 @@
 
 #define VIB_DUTY                127 //0~255
 
-MCP_CAN CAN0(SPI_CS_PIN);
+//for mass production model
+#define ADDR_TOFCAP     0x080       // 0b0 001 0000 000  ToF/Touch sensor data
+#define ADDR_TACT       0x089       // 0b0 001 0001 001  TACT SW data
+#define ADDR_VIB        0x090       // 0b0 001 0010 000  Vibrator command
+#define ADDR_SERVO_EN   0x098       // 0b0 001 0011 000  Servo enable/disable
+#define ADDR_SERVO_TGT  0x099       // 0b0 001 0011 001  Servor target position
+#define ADDR_SERVO_POS  0x09a       // 0b0 001 0011 010  Servo present position
+#define ADDR_CAP_BASE   0x480       // 0b1 001 0000 000  CAP1203 Debug base address
+#define ADDR_CAP_STAT   0x481       // 0b1 001 0000 001  CAP1203 Debug sensor status
+#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1 (setCalibrationStatusReg)
+#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2 (setNegativeDeltaCountReg)
+#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3 (setSensorInputEnableReg)
+#define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
+#define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
+
+#define CAN_FILTER0     0x00900000  // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
+#define CAN_FILTER1     0x04800000  // 0b1 001 0000 000 filter for ADDR_CAP_WR*
+#define CAN_MASK0       0x07f00000  // 0b1 111 1110 000 mask by priority, major, minor (upper 3bit)
+#define CAN_MASK1       0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
+
+MCP2515 mcp2515(SPI_CS_PIN);
 HardwareSerial dxif(DXIF_RXD, DXIF_TXD);
 Dynamixel2Arduino dxl(dxif, DXIF_DIR);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 cap1203 cap_sens(&Wire);
 
-volatile unsigned char buff0x1b[3];
-volatile unsigned char buff0x1c[4];
-volatile unsigned char buff0x20[1];
+volatile unsigned char buff_vib[3];
+volatile unsigned char buff_tgt[4];
+volatile unsigned char buff_en[1];
+volatile unsigned char buff_wr1[1];
+volatile unsigned char buff_wr2[1];
+volatile unsigned char buff_wr3[1];
+volatile unsigned char buff_wr4[1];
+volatile unsigned char buff_wr5[1];
 
-byte data0x12[4] = {0};
-byte data0x13[1] = {0}; 
-uint8_t data0x1f[4];
+byte data_tofcap[4] = {0};
+byte data_tact[1] = {0}; 
+byte data_capstat[3] = {0};
+uint8_t data_pos[4];
 
 uint8_t vib0_count;
 uint8_t vib1_count;
@@ -89,49 +115,72 @@ const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
 void mcpISR(){
-  //Serial.println("isr");
-  long unsigned int id;
-  unsigned char len = 0;
-  unsigned char buff[8];
+  struct can_frame recvMsg;
     
-  while(CAN0.checkReceive()==CAN_MSGAVAIL)
+  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
   {
-    CAN0.readMsgBuf(&id, &len, buff);
-  
-    if((id & 0x80000000) == 0x80000000){return;}
-
-    if(id == 0x1b)
+    if(recvMsg.can_id == ADDR_VIB)
     {
-      memcpy((unsigned char *)buff0x1b, buff, 3);
-      vib0_count = (buff0x1b[0]!=0) ? buff0x1b[0] : vib0_count;
-      vib1_count = (buff0x1b[1]!=0) ? buff0x1b[1] : vib1_count;
-      vib2_count = (buff0x1b[2]!=0) ? buff0x1b[2] : vib2_count;
+      buff_vib[0] = recvMsg.data[0];
+      buff_vib[1] = recvMsg.data[1];
+      buff_vib[2] = recvMsg.data[2];
+        
+      vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
+      vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
+      vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
     }
-    if(id == 0x1c)
+    if(recvMsg.can_id == ADDR_SERVO_TGT)
     {
       if(servo_enable)
       {
-        memcpy((unsigned char *)buff0x1c, buff, 4);
-        servo_angle = ((uint32_t)buff0x1c[3]) << 24 | ((uint32_t)buff0x1c[2]) << 16 | ((uint16_t)buff0x1c[1]) << 8 | ((uint16_t)buff0x1c[0]) << 0;
+        buff_tgt[0] = recvMsg.data[0];
+        buff_tgt[1] = recvMsg.data[1];
+        buff_tgt[2] = recvMsg.data[2];
+        buff_tgt[3] = recvMsg.data[3];
+          
+        servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
       }
     }
-    if(id == 0x20)
+    if(recvMsg.can_id == ADDR_SERVO_EN)
     {
       if(servo_enable)
       {
-        memcpy((unsigned char *)buff0x20, buff, 1);
+        buff_en[0] = recvMsg.data[0];
         onoff_recived = true;
-        /*if(buff0x20[0] == 0x00)
-        {
-          dxl.torqueOff(DXL_ID);
-        }
-        if(buff0x20[0] == 0x01)
-        {
-          dxl.torqueOn(DXL_ID);
-        }*/
       }
+    }
+      
+    if(recvMsg.can_id == ADDR_CAP_WR1)
+    {
+      buff_wr1[0] = recvMsg.data[0];
+      cap_sens.setCalibrationStatusReg(buff_wr1[0]);
+    }
+      
+    if(recvMsg.can_id == ADDR_CAP_WR2)
+    {
+      buff_wr2[0] = recvMsg.data[0];
+      cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
+    }
+      
+    if(recvMsg.can_id == ADDR_CAP_WR3)
+    {
+      buff_wr3[0] = recvMsg.data[0];
+      cap_sens.setSensorInputEnableReg(buff_wr3[0]);
+    }
+
+    if(recvMsg.can_id == ADDR_CAP_WR4)
+    {
+      buff_wr4[0] = recvMsg.data[0];
+      cap_sens.setConfigurationReg(buff_wr4[0]);
+    }
+
+    if(recvMsg.can_id == ADDR_CAP_WR5)
+    {
+      buff_wr5[0] = recvMsg.data[0];
+      cap_sens.setConfiguration2Reg(buff_wr5[0]);
     }
   }
+  mcp2515.clearInterrupts();
 }
 
 void task2ms(void *pvParameters)
@@ -241,7 +290,6 @@ void task10ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
-    //Serial.println("10ms");
     if(vib0_count>0){digitalWrite(VIB_0, HIGH);vib0_count--;}
     else{digitalWrite(VIB_0, LOW);}
     if(vib1_count>0){digitalWrite(VIB_1, HIGH);vib1_count--;}
@@ -260,28 +308,44 @@ void task20ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
-    //Serial.println("20ms");
-    //taskENTER_CRITICAL();
+    struct can_frame sendMsg;
     uint16_t tof;
     tof = lox.readRangeResult();
-    data0x12[0] = (tof & 0x00ff) >> 0;
-    data0x12[1] = (tof & 0xff00) >> 8;
-    data0x12[2] = cap_sens.getSensorInput1DeltaCountReg();
-    data0x12[3] = cap_sens.getSensorInputStatusReg();
+    sendMsg.can_id = ADDR_TOFCAP;
+    sendMsg.can_dlc = 4;
+    sendMsg.data[0] = (tof & 0x00ff) >> 0;
+    sendMsg.data[1] = (tof & 0xff00) >> 8;
+    sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
+    sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
     cap_sens.setMainControlReg(false, false, false);
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(0x12, 0, 4, data0x12);
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
-    
-    data0x13[0] = sw_right << 0
-                | sw_left  << 1
-                | sw_up    << 2
-                | sw_down  << 3;
-    data0x13[0] = (data0x13[0])&0x0f;
+
+    sendMsg.can_id = ADDR_CAP_STAT;
+    sendMsg.can_dlc = 3;
+    sendMsg.data[0] = cap_sens.getGeneralStatusReg();
+    sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
+    sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
     detachInterrupt(digitalPinToInterrupt(SPI_INT));
-    CAN0.sendMsgBuf(0x13, 0, 1, data0x13);
+    mcp2515.sendMessage(&sendMsg);
+    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
+    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    delayMicroseconds(500);
+    
+    data_tact[0] = sw_right << 0
+                 | sw_left  << 1
+                 | sw_up    << 2
+                 | sw_down  << 3;
+    data_tact[0] = (data_tact[0])&0x0f;
+    
+    sendMsg.can_id = ADDR_TACT;
+    sendMsg.can_dlc = 1;
+    sendMsg.data[0] = data_tact[0];
+    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+    mcp2515.sendMessage(&sendMsg);
     attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
     if(digitalRead(SPI_INT) == LOW){mcpISR();}
     delayMicroseconds(500);
@@ -292,33 +356,32 @@ void task20ms(void *pvParameters)
     {
       if(onoff_recived == true)
       {
-        if(buff0x20[0] == 0x00)
+        if(buff_en[0] == 0x00)
         {
           dxl.torqueOff(DXL_ID);
         }
-        if(buff0x20[0] == 0x01)
+        if(buff_en[0] == 0x01)
         {
           dxl.torqueOn(DXL_ID); 
         }
         onoff_recived == false;
       }
       
-      //dxl.write(DXL_ID, GOAL_POSITION_ADDR, (uint8_t*)&servo_angle, 4, TIMEOUT);
       dxl.setGoalPosition(DXL_ID, servo_angle);
       delayMicroseconds(500);
-      //dxl.read(DXL_ID, PRESENT_POSITION_ADDR, 4, (uint8_t*)&angle, , TIMEOUT);
       uint32_t angle = dxl.getPresentPosition(DXL_ID);
       
-      data0x1f[0] = (angle & 0x000000ff) >> 0;
-      data0x1f[1] = (angle & 0x0000ff00) >> 8;
-      data0x1f[2] = (angle & 0x00ff0000) >> 16;
-      data0x1f[3] = (angle & 0xff000000) >> 24;
+      sendMsg.can_id = ADDR_SERVO_POS;
+      sendMsg.can_dlc = 4;
+      sendMsg.data[0] = (angle & 0x000000ff) >> 0;
+      sendMsg.data[1] = (angle & 0x0000ff00) >> 8;
+      sendMsg.data[2] = (angle & 0x00ff0000) >> 16;
+      sendMsg.data[3] = (angle & 0xff000000) >> 24;
       detachInterrupt(digitalPinToInterrupt(SPI_INT));
-      CAN0.sendMsgBuf(0x1f, 0, 4, data0x1f);
+      mcp2515.sendMessage(&sendMsg);
       attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
       if(digitalRead(SPI_INT) == LOW){mcpISR();}
     }
-    //taskEXIT_CRITICAL();
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -338,10 +401,10 @@ void setup()
   Serial.begin(115200);
   dxl.begin(115200);
 
-  pinMode(SW_RIGHT, INPUT_PULLUP);
-  pinMode(SW_LEFT, INPUT_PULLUP);
-  pinMode(SW_UP, INPUT_PULLUP);
-  pinMode(SW_DOWN, INPUT_PULLUP);
+  pinMode(SW_RIGHT, INPUT);
+  pinMode(SW_LEFT, INPUT);
+  pinMode(SW_UP, INPUT);
+  pinMode(SW_DOWN, INPUT);
   pinMode(VIB_0, OUTPUT);
   pinMode(VIB_1, OUTPUT);
   pinMode(VIB_2, OUTPUT);
@@ -361,7 +424,7 @@ void setup()
   vib0_count = 0;
   vib1_count = 0;
   vib2_count = 0;
-
+  
   servo_angle = 2047;
 
   while(!lox.begin())
@@ -383,17 +446,17 @@ void setup()
   cap_sens.begin();
   cap_sens.setSensitivityControlReg(BASE_DEF, DELTA_4X);
 
-  CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
   
-  CAN0.init_Mask(0,0,0x7ff0000);
-  CAN0.init_Filt(0,0,0x01b0000);
-  CAN0.init_Filt(1,0,0x01c0000);
-  
-  CAN0.init_Mask(1,0,0x7ff0000);
-  CAN0.init_Filt(2,0,0x0200000);
-  
+  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK0);
+  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER0);
+
+  mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
+  mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER1);
+
+  mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
-  CAN0.setMode(MCP_NORMAL);
   Serial.println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
 

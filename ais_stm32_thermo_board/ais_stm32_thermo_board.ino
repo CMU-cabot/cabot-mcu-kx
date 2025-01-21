@@ -1,5 +1,5 @@
 #include <STM32FreeRTOS.h>
-#include <mcp_can.h>
+#include <mcp2515.h>
 #include <SPI.h>
 #include <Wire.h>
 
@@ -23,17 +23,15 @@
 #define STM32_RXD     PA10
 
 #define ADT_RTS       PA1
-#define ADDR_ADT      0x48
+#define SENS_ADT      0x48
 
-MCP_CAN CAN0(SPI_CS_PIN);
+#define ADDR_BASE     0x21
 
-volatile bool flag_power_on   = false;
-volatile bool flag_shutdown   = false;
-volatile bool flag_rebooting  = false;
-volatile bool flag_emergency  = false;
-volatile bool flag_sequencing = false;
+MCP2515 mcp2515(SPI_CS_PIN);
 
-char node_id = 0x21;
+char node_id = ADDR_BASE;
+struct can_frame sendMsg;
+struct can_frame recvMsg;
 
 int checkSlave(uint8_t addr)
 {
@@ -54,8 +52,6 @@ void mcpISR(){
   long unsigned int id;
   unsigned char len = 0;
   unsigned char buff[8];
-  
-  CAN0.readMsgBuf(&id, &len, buff);
 }
 
 void task_measure(void *pvParameters)
@@ -66,19 +62,20 @@ void task_measure(void *pvParameters)
   while(1)
   {
      int16_t temp;
-     int err = checkSlave(ADDR_ADT);
+     int err = checkSlave(SENS_ADT);
      Serial.print("ADT ");
      Serial.print(err);
-     Wire.requestFrom(ADDR_ADT, 2);
+     Wire.requestFrom(SENS_ADT, 2);
      temp = (((uint16_t)(Wire.read())<<8) | Wire.read())>>3;
      Serial.print("  temp ");
      Serial.println(temp);
 
-     byte send_data[2] = {0};
-     send_data[0] = (temp & 0x00ff)>>0;
-     send_data[1] = (temp & 0xff00)>>8;
+     sendMsg.can_id = node_id;
+     sendMsg.can_dlc = 2;
+     sendMsg.data[0] = (temp & 0x00ff)>>0;
+     sendMsg.data[1] = (temp & 0xff00)>>8;
      detachInterrupt(digitalPinToInterrupt(SPI_INT));
-     CAN0.sendMsgBuf(node_id, 0, 2, send_data);
+     mcp2515.sendMessage(&sendMsg);
      attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
      vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -123,10 +120,11 @@ void setup()
      | digitalRead(DIP_SW_3) << 3;
   node_id += id;
 
-  CAN0.begin(MCP_STDEXT, CAN_1000KBPS, MCP_20MHZ);
-  CAN0.init_Mask(0,0,0x07ff0000);
-  CAN0.init_Filt(0,0,0x00000000);
-  CAN0.setMode(MCP_NORMAL);
+  mcp2515.reset();
+  mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
+  mcp2515.setFilterMask(MCP2515::MASK0, false, 0x07ff0000);
+  mcp2515.setFilter(MCP2515::RXF0, false, 0x00000000);
+  mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
 
   xTaskCreate(task_measure,  "task_measure",  configMINIMAL_STACK_SIZE, NULL, 10,  NULL);
