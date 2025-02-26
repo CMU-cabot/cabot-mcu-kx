@@ -71,8 +71,7 @@ MCP2515 mcp2515(SPI_CS_PIN);
 
 volatile SemaphoreHandle_t semaphoreSequence;
 volatile SemaphoreHandle_t semaphoreCanISR;
-volatile SemaphoreHandle_t semaphoreSerial;
-volatile SemaphoreHandle_t semaphoreCanIO;
+volatile SemaphoreHandle_t semaphoreSerialCanIO;
 
 volatile bool flag_power_on   = false;
 volatile bool flag_shutdown   = false;
@@ -98,30 +97,30 @@ int reset_count = 0;
 
 void debug_print(char *str) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
   Serial.print(str);
-  xSemaphoreGive(semaphoreSerial);
+  xSemaphoreGive(semaphoreSerialCanIO);
 }
 
 void debug_println(char *str) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
   Serial.println(str);
-  xSemaphoreGive(semaphoreSerial);
+  xSemaphoreGive(semaphoreSerialCanIO);
 }
 
 void debug_print(int num) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
   Serial.print(num);
-  xSemaphoreGive(semaphoreSerial);
+  xSemaphoreGive(semaphoreSerialCanIO);
 }
 
 void debug_println(int num) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
   Serial.println(num);
-  xSemaphoreGive(semaphoreSerial);
+  xSemaphoreGive(semaphoreSerialCanIO);
 }
 
 void setChannel(uint8_t ch)
@@ -189,9 +188,9 @@ void mcpISR() {
 
 void task_read(void *pvParameters) {
   while(1) {
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
     uint8_t irq = mcp2515.getInterrupts();
-    xSemaphoreGive(semaphoreCanIO);
+    xSemaphoreGive(semaphoreSerialCanIO);
 
     struct can_frame recvMsg;
     // read from RXB0 or RXB1 if any available data
@@ -199,16 +198,16 @@ void task_read(void *pvParameters) {
     if (irq & MCP2515::CANINTF_RX0IF) {
       debug_println("task_read0");
       // frame contains received from RXB0 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
-      xSemaphoreGive(semaphoreCanIO);
+      xSemaphoreGive(semaphoreSerialCanIO);
     }
     else if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
-      xSemaphoreGive(semaphoreCanIO);
+      xSemaphoreGive(semaphoreSerialCanIO);
     }
     else {
       debug_println("task_read wait");
@@ -282,9 +281,9 @@ void task_emergency()
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = 0x01;
 
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    xSemaphoreGive(semaphoreSerialCanIO);
   }
 }
 
@@ -330,9 +329,9 @@ void task_sequence(void *pvParameters)
     if(flag_power_on == true && flag_shutdown == false)
     {
       sendMsg.data[0] = 0x01;
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreCanIO);
+      xSemaphoreGive(semaphoreSerialCanIO);
 
       digitalWrite(G_24V, HIGH);
       vTaskDelay(100);
@@ -355,9 +354,9 @@ void task_sequence(void *pvParameters)
     else if(flag_power_on == true && flag_shutdown == true)
     {
       sendMsg.data[0] = 0x00;
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreCanIO);
+      xSemaphoreGive(semaphoreSerialCanIO);
       
       //shutdown sequence
       while(sequence_cnt<SHUTDOWN_FRC)
@@ -408,9 +407,9 @@ void task_send(void *pvParameters)
     sendMsg.data[0] = digitalRead(LED_0) << 0
                     | digitalRead(LED_1) << 1;
 
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    xSemaphoreGive(semaphoreSerialCanIO);
     vTaskDelay(1);
 
     uint16_t voltage  = 0;
@@ -461,9 +460,9 @@ void task_send(void *pvParameters)
       battery_sn[i*2]   = (sn&0x00ff) >> 0;
       battery_sn[i*2+1] = (sn&0xff00) >> 8;
 
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreCanIO);
+      xSemaphoreGive(semaphoreSerialCanIO);
       vTaskDelay(1);
       
     }
@@ -477,9 +476,9 @@ void task_send(void *pvParameters)
                     | digitalRead(G_12V_PC)     << 4
                     | digitalRead(G_24V)        << 5;
 
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    xSemaphoreGive(semaphoreSerialCanIO);
     vTaskDelay(1);
 
     sendMsg.can_id = ADDR_BAT_SN;
@@ -493,9 +492,9 @@ void task_send(void *pvParameters)
     sendMsg.data[6] = battery_sn[6];
     sendMsg.data[7] = battery_sn[7];
 
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    xSemaphoreGive(semaphoreSerialCanIO);
     
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -552,9 +551,7 @@ void setup()
 
   semaphoreSequence = xSemaphoreCreateBinary();
   semaphoreCanISR = xSemaphoreCreateBinary();
-  semaphoreSerial = xSemaphoreCreateBinary();
-  semaphoreCanIO = xSemaphoreCreateBinary();
-
+  semaphoreSerialCanIO = xSemaphoreCreateBinary();
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
