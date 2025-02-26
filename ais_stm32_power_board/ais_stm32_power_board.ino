@@ -70,7 +70,9 @@
 MCP2515 mcp2515(SPI_CS_PIN);
 
 volatile SemaphoreHandle_t semaphoreSequence;
-volatile SemaphoreHandle_t semaphoreCanRead;
+volatile SemaphoreHandle_t semaphoreCanISR;
+volatile SemaphoreHandle_t semaphoreSerial;
+volatile SemaphoreHandle_t semaphoreCanIO;
 
 volatile bool flag_power_on   = false;
 volatile bool flag_shutdown   = false;
@@ -96,30 +98,30 @@ int reset_count = 0;
 
 void debug_print(char *str) {
   if (!DEBUG) return;
-  taskENTER_CRITICAL();
+  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
   Serial.print(str);
-  taskEXIT_CRITICAL();
+  xSemaphoreGive(semaphoreSerial);
 }
 
 void debug_println(char *str) {
   if (!DEBUG) return;
-  taskENTER_CRITICAL();
+  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
   Serial.println(str);
-  taskEXIT_CRITICAL();
+  xSemaphoreGive(semaphoreSerial);
 }
 
 void debug_print(int num) {
   if (!DEBUG) return;
-  taskENTER_CRITICAL();
+  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
   Serial.print(num);
-  taskEXIT_CRITICAL();
+  xSemaphoreGive(semaphoreSerial);
 }
 
 void debug_println(int num) {
   if (!DEBUG) return;
-  taskENTER_CRITICAL();
+  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
   Serial.println(num);
-  taskEXIT_CRITICAL();
+  xSemaphoreGive(semaphoreSerial);
 }
 
 void setChannel(uint8_t ch)
@@ -181,14 +183,14 @@ int checkSlave(uint8_t addr)
 
 void mcpISR() {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  xSemaphoreGiveFromISR(semaphoreCanRead, &xHigherPriorityTaskWoken);
+  xSemaphoreGiveFromISR(semaphoreCanISR, &xHigherPriorityTaskWoken);
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 void task_read(void *pvParameters) {
   while(1) {
     // wait for interrupt
-    if (xSemaphoreTake(semaphoreCanRead, portMAX_DELAY) != pdTRUE) {
+    if (xSemaphoreTake(semaphoreCanISR, portMAX_DELAY) != pdTRUE) {
       // this may not happen
       continue;
     }
@@ -196,12 +198,12 @@ void task_read(void *pvParameters) {
     debug_println("task_read");
     struct can_frame recvMsg;
 
-    taskENTER_CRITICAL();
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     if(mcp2515.readMessage(&recvMsg) != MCP2515::ERROR_OK) {
       // this may not happen
       continue;
     }
-    taskEXIT_CRITICAL();
+    xSemaphoreGive(semaphoreCanIO);
 
     // process recvMsg
     if(recvMsg.can_id == ADDR_ODRIVE)
@@ -267,9 +269,9 @@ void task_emergency()
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = 0x01;
 
-    taskENTER_CRITICAL();
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    taskEXIT_CRITICAL();
+    xSemaphoreGive(semaphoreCanIO);
   }
 }
 
@@ -315,9 +317,9 @@ void task_sequence(void *pvParameters)
     if(flag_power_on == true && flag_shutdown == false)
     {
       sendMsg.data[0] = 0x01;
-      taskENTER_CRITICAL();
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      taskEXIT_CRITICAL();
+      xSemaphoreGive(semaphoreCanIO);
 
       digitalWrite(G_24V, HIGH);
       vTaskDelay(100);
@@ -340,9 +342,9 @@ void task_sequence(void *pvParameters)
     else if(flag_power_on == true && flag_shutdown == true)
     {
       sendMsg.data[0] = 0x00;
-      taskENTER_CRITICAL();
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      taskEXIT_CRITICAL();
+      xSemaphoreGive(semaphoreCanIO);
       
       //shutdown sequence
       while(sequence_cnt<SHUTDOWN_FRC)
@@ -393,9 +395,9 @@ void task_send(void *pvParameters)
     sendMsg.data[0] = digitalRead(LED_0) << 0
                     | digitalRead(LED_1) << 1;
 
-    taskENTER_CRITICAL();
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    taskEXIT_CRITICAL();
+    xSemaphoreGive(semaphoreCanIO);
     vTaskDelay(1);
 
     uint16_t voltage  = 0;
@@ -446,9 +448,9 @@ void task_send(void *pvParameters)
       battery_sn[i*2]   = (sn&0x00ff) >> 0;
       battery_sn[i*2+1] = (sn&0xff00) >> 8;
 
-      taskENTER_CRITICAL();
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      taskEXIT_CRITICAL();
+      xSemaphoreGive(semaphoreCanIO);
       vTaskDelay(1);
       
     }
@@ -462,9 +464,9 @@ void task_send(void *pvParameters)
                     | digitalRead(G_12V_PC)     << 4
                     | digitalRead(G_24V)        << 5;
 
-    taskENTER_CRITICAL();
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    taskEXIT_CRITICAL();
+    xSemaphoreGive(semaphoreCanIO);
     vTaskDelay(1);
 
     sendMsg.can_id = ADDR_BAT_SN;
@@ -478,9 +480,9 @@ void task_send(void *pvParameters)
     sendMsg.data[6] = battery_sn[6];
     sendMsg.data[7] = battery_sn[7];
 
-    taskENTER_CRITICAL();
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    taskEXIT_CRITICAL();
+    xSemaphoreGive(semaphoreCanIO);
     
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -536,7 +538,10 @@ void setup()
   pinMode(SPI_INT, INPUT);
 
   semaphoreSequence = xSemaphoreCreateBinary();
-  semaphoreCanRead = xSemaphoreCreateBinary();
+  semaphoreCanISR = xSemaphoreCreateBinary();
+  semaphoreSerial = xSemaphoreCreateBinary();
+  semaphoreCanIO = xSemaphoreCreateBinary();
+
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
