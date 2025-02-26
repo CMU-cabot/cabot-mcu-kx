@@ -63,9 +63,14 @@
 #define SHUTDOWN_PC   60000   // pc shutdown wait time[ms](Not used)
 #define SHUTDOWN_FRC  120000  // force shutdown time[ms]
 
+#ifndef DEBUG                 // you can set DEBUG=1 to print debug message via Serial
+#define DEBUG 0
+#endif
+
 MCP2515 mcp2515(SPI_CS_PIN);
 
 volatile SemaphoreHandle_t semaphoreSequence;
+volatile SemaphoreHandle_t semaphoreCanRead;
 
 volatile bool flag_power_on   = false;
 volatile bool flag_shutdown   = false;
@@ -88,6 +93,34 @@ int32_t sequence_cnt  = 0;
 
 //debug
 int reset_count = 0;
+
+void debug_print(char *str) {
+  if (!DEBUG) return;
+  taskENTER_CRITICAL();
+  Serial.print(str);
+  taskEXIT_CRITICAL();
+}
+
+void debug_println(char *str) {
+  if (!DEBUG) return;
+  taskENTER_CRITICAL();
+  Serial.println(str);
+  taskEXIT_CRITICAL();
+}
+
+void debug_print(int num) {
+  if (!DEBUG) return;
+  taskENTER_CRITICAL();
+  Serial.print(num);
+  taskEXIT_CRITICAL();
+}
+
+void debug_println(int num) {
+  if (!DEBUG) return;
+  taskENTER_CRITICAL();
+  Serial.println(num);
+  taskEXIT_CRITICAL();
+}
 
 void setChannel(uint8_t ch)
 {
@@ -146,12 +179,31 @@ int checkSlave(uint8_t addr)
   return err;
 }
 
-void mcpISR(){
-  Serial.println("isr");
-  struct can_frame recvMsg;
+void mcpISR() {
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  xSemaphoreGiveFromISR(semaphoreCanRead, &xHigherPriorityTaskWoken);
+  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
 
-  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
-  {
+void task_read(void *pvParameters) {
+  while(1) {
+    // wait for interrupt
+    if (xSemaphoreTake(semaphoreCanRead, portMAX_DELAY) != pdTRUE) {
+      // this may not happen
+      continue;
+    }
+
+    debug_println("task_read");
+    struct can_frame recvMsg;
+
+    taskENTER_CRITICAL();
+    if(mcp2515.readMessage(&recvMsg) != MCP2515::ERROR_OK) {
+      // this may not happen
+      continue;
+    }
+    taskEXIT_CRITICAL();
+
+    // process recvMsg
     if(recvMsg.can_id == ADDR_ODRIVE)
     {
       buff_odrive[0] = recvMsg.data[0];
@@ -161,85 +213,87 @@ void mcpISR(){
         flag_emergency = false;
       }
     }
-    if(recvMsg.can_id == ADDR_PC)
+    else if(recvMsg.can_id == ADDR_PC)
     {
       buff_pc[0] = recvMsg.data[0];
       if(buff_pc[0] == 0x00)
       {
-        shutdownISR();
+        task_shutdown();
       }
       if(buff_pc[0] == 0x01)
       {
-        poweronISR();
+        task_poweron();
       }
     }
-    if(recvMsg.can_id == ADDR_D455_1)
+    else if(recvMsg.can_id == ADDR_D455_1)
     {
       buff_d455_1[0] = recvMsg.data[0];
       (buff_d455_1[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_1, HIGH)) : (digitalWrite(G_12V_D455_1, LOW));
     }
-    if(recvMsg.can_id == ADDR_D455_2)
+    else if(recvMsg.can_id == ADDR_D455_2)
     {
       buff_d455_2[0] = recvMsg.data[0];
       (buff_d455_2[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_2, HIGH)) : (digitalWrite(G_12V_D455_2, LOW));
     }
-    if(recvMsg.can_id == ADDR_D455_3)
+    else if(recvMsg.can_id == ADDR_D455_3)
     {
       buff_d455_3[0] = recvMsg.data[0];
       (buff_d455_3[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_3, HIGH)) : (digitalWrite(G_12V_D455_3, LOW));
     }
-    if(recvMsg.can_id == ADDR_MCU)
+    else if(recvMsg.can_id == ADDR_MCU)
     {
       buff_mcu[0] = recvMsg.data[0];
       (buff_mcu[0]&0x01 == 0x01) ? (digitalWrite(G_5V_MCU, HIGH)) : (digitalWrite(G_5V_MCU, LOW));
     }
-    if(recvMsg.can_id == ADDR_PWM)
+    else if(recvMsg.can_id == ADDR_PWM)
     {
       buff_pwm[0] = recvMsg.data[0];
       analogWrite(PWM_FAN, 255 - buff_pwm[0]);
     }
+    // is this required? readMessage will off the flag
+    // mcp2515.clearInterrupts();
   }
-  mcp2515.clearInterrupts();  
 }
 
-void emergencyISR()
+void task_emergency()
 {
   if(flag_emergency == false)
   {
-    Serial.println("emergency");
-    taskENTER_CRITICAL();
+    debug_println("emergency");
     digitalWrite(G_24V, LOW);
     flag_emergency = true;
     struct can_frame sendMsg;
     sendMsg.can_id = ADDR_EMS;
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = 0x01;
+
+    taskENTER_CRITICAL();
     mcp2515.sendMessage(&sendMsg);
     taskEXIT_CRITICAL();
   }
 }
 
-void poweronISR()
+void task_poweron()
 {
   if(flag_sequencing == false && flag_power_on == false)
   {
-    Serial.println("poweron");
+    debug_println("poweron");
     flag_sequencing = true;
     digitalWrite(LED_0, HIGH);
     flag_power_on = true;
-    xSemaphoreGiveFromISR(semaphoreSequence, NULL);
+    xSemaphoreGive(semaphoreSequence);
   }
 }
 
-void shutdownISR()
+void task_shutdown()
 {
   if(flag_sequencing == false && flag_power_on == true)
   {
-    Serial.println("shutdown");
+    debug_println("shutdown");
     flag_sequencing = true;
     digitalWrite(LED_1, HIGH);
     flag_shutdown  = true;
-    xSemaphoreGiveFromISR(semaphoreSequence, NULL);
+    xSemaphoreGive(semaphoreSequence);
   }
 }
 
@@ -248,8 +302,12 @@ void task_sequence(void *pvParameters)
 {
   while(1)
   {
-    xSemaphoreTake(semaphoreSequence, portMAX_DELAY);
-    Serial.println("sequence");
+    if (xSemaphoreTake(semaphoreSequence, portMAX_DELAY) != pdTRUE) {
+      // this may not happen
+      continue;
+    }
+    debug_println("sequence");
+
     struct can_frame sendMsg;
     sendMsg.can_id = ADDR_SEQ;
     sendMsg.can_dlc = 1;
@@ -257,8 +315,10 @@ void task_sequence(void *pvParameters)
     if(flag_power_on == true && flag_shutdown == false)
     {
       sendMsg.data[0] = 0x01;
+      taskENTER_CRITICAL();
       mcp2515.sendMessage(&sendMsg);
-      
+      taskEXIT_CRITICAL();
+
       digitalWrite(G_24V, HIGH);
       vTaskDelay(100);
       digitalWrite(G_12V_PC, HIGH);
@@ -280,7 +340,9 @@ void task_sequence(void *pvParameters)
     else if(flag_power_on == true && flag_shutdown == true)
     {
       sendMsg.data[0] = 0x00;
+      taskENTER_CRITICAL();
       mcp2515.sendMessage(&sendMsg);
+      taskEXIT_CRITICAL();
       
       //shutdown sequence
       while(sequence_cnt<SHUTDOWN_FRC)
@@ -324,16 +386,16 @@ void task_send(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
-    Serial.println("send");
+    debug_println("send");
     struct can_frame sendMsg;
     sendMsg.can_id = ADDR_IND;
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = digitalRead(LED_0) << 0
                     | digitalRead(LED_1) << 1;
-    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+
+    taskENTER_CRITICAL();
     mcp2515.sendMessage(&sendMsg);
-    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
-    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    taskEXIT_CRITICAL();
     vTaskDelay(1);
 
     uint16_t voltage  = 0;
@@ -349,19 +411,20 @@ void task_send(void *pvParameters)
       
       int err = 0;
       err = checkSlave(SMBUS_MUX);
-      Serial.print("mux  ");
-      Serial.print(i);
-      Serial.print(" ");
-      Serial.println(err);
+
+      debug_print("mux  ");
+      debug_print(i);
+      debug_print(" ");
+      debug_println(err);
       
       err = checkSlave(SMBUS_BATT);
-      Serial.print("batt ");
-      Serial.print(i);
-      Serial.print(" ");
-      Serial.println(err);
+      debug_print("batt ");
+      debug_print(i);
+      debug_print(" ");
+      debug_println(err);
 
-      Serial.print("reset ");
-      Serial.println(reset_count);
+      debug_print("reset ");
+      debug_println(reset_count);
 
       voltage = readWord(SMBUS_VOLTAGE); //Voltage[mV]
       current = readWord(SMBUS_CULLENT); //Current[mA]
@@ -383,10 +446,9 @@ void task_send(void *pvParameters)
       battery_sn[i*2]   = (sn&0x00ff) >> 0;
       battery_sn[i*2+1] = (sn&0xff00) >> 8;
 
-      detachInterrupt(digitalPinToInterrupt(SPI_INT));
+      taskENTER_CRITICAL();
       mcp2515.sendMessage(&sendMsg);
-      attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
-      if(digitalRead(SPI_INT) == LOW){mcpISR();}
+      taskEXIT_CRITICAL();
       vTaskDelay(1);
       
     }
@@ -399,10 +461,10 @@ void task_send(void *pvParameters)
                     | digitalRead(G_12V_D455_1) << 3
                     | digitalRead(G_12V_PC)     << 4
                     | digitalRead(G_24V)        << 5;
-    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+
+    taskENTER_CRITICAL();
     mcp2515.sendMessage(&sendMsg);
-    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
-    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    taskEXIT_CRITICAL();
     vTaskDelay(1);
 
     sendMsg.can_id = ADDR_BAT_SN;
@@ -415,10 +477,10 @@ void task_send(void *pvParameters)
     sendMsg.data[5] = battery_sn[5];
     sendMsg.data[6] = battery_sn[6];
     sendMsg.data[7] = battery_sn[7];
-    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+
+    taskENTER_CRITICAL();
     mcp2515.sendMessage(&sendMsg);
-    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
-    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    taskEXIT_CRITICAL();
     
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -474,9 +536,11 @@ void setup()
   pinMode(SPI_INT, INPUT);
 
   semaphoreSequence = xSemaphoreCreateBinary();
+  semaphoreCanRead = xSemaphoreCreateBinary();
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
+  xTaskCreate(task_read,      "task_read",      configMINIMAL_STACK_SIZE, NULL, 10, NULL);
 
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR,       FALLING);
   vTaskStartScheduler(); 
@@ -484,10 +548,10 @@ void setup()
 
 void loop()
 {
-  //Serial.println("loop");
+  //debug_println("loop");
   if(digitalRead(SW_EW) == LOW && flag_emergency == false && flag_power_on == true)
   {
-    emergencyISR();
+    task_emergency();
   }
 
   if(digitalRead(SW_0) == LOW && flag_sequencing == false && flag_power_on == false)
@@ -495,7 +559,7 @@ void loop()
     if(poweron_cnt >= 500)
     {
       poweron_cnt = 0;
-      poweronISR();
+      task_poweron();
     }
     else
     {
@@ -512,7 +576,7 @@ void loop()
     if(shutdown_cnt >= 2000)
     {
       shutdown_cnt = 0;
-      shutdownISR();
+      task_shutdown();
     }
     else
     {
