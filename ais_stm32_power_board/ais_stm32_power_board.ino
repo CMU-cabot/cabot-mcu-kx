@@ -189,21 +189,34 @@ void mcpISR() {
 
 void task_read(void *pvParameters) {
   while(1) {
-    // wait for interrupt
-    if (xSemaphoreTake(semaphoreCanISR, portMAX_DELAY) != pdTRUE) {
-      // this may not happen
-      continue;
-    }
-
-    debug_println("task_read");
-    struct can_frame recvMsg;
-
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    if(mcp2515.readMessage(&recvMsg) != MCP2515::ERROR_OK) {
-      // this may not happen
+    uint8_t irq = mcp2515.getInterrupts();
+    xSemaphoreGive(semaphoreCanIO);
+
+    struct can_frame recvMsg;
+    // read from RXB0 or RXB1 if any available data
+    // otherwise wait for next interrupt
+    if (irq & MCP2515::CANINTF_RX0IF) {
+      debug_println("task_read0");
+      // frame contains received from RXB0 message
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
+      xSemaphoreGive(semaphoreCanIO);
+    }
+    else if (irq & MCP2515::CANINTF_RX1IF) {
+      debug_println("task_read1");
+      // frame contains received from RXB1 message
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
+      xSemaphoreGive(semaphoreCanIO);
+    }
+    else {
+      debug_println("task_read wait");
+      // wait for interrupt
+      xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
+      // process data in the next loop
       continue;
     }
-    xSemaphoreGive(semaphoreCanIO);
 
     // process recvMsg
     if(recvMsg.can_id == ADDR_ODRIVE)
