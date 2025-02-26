@@ -61,6 +61,10 @@
 #define CAN_MASK0       0x07f00000  // 0b1 111 1110 000 mask by priority, major, minor (upper 3bit)
 #define CAN_MASK1       0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
 
+#ifndef DEBUG                 // you can set DEBUG=1 to print debug message via Serial
+#define DEBUG 0
+#endif
+
 MCP2515 mcp2515(SPI_CS_PIN);
 HardwareSerial dxif(DXIF_RXD, DXIF_TXD);
 Dynamixel2Arduino dxl(dxif, DXIF_DIR);
