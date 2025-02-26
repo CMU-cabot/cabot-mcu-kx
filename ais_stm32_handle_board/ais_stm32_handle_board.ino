@@ -67,6 +67,10 @@ Dynamixel2Arduino dxl(dxif, DXIF_DIR);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 cap1203 cap_sens(&Wire);
 
+volatile SemaphoreHandle_t semaphoreCanISR;
+volatile SemaphoreHandle_t semaphoreSerial;
+volatile SemaphoreHandle_t semaphoreCanIO;
+
 volatile unsigned char buff_vib[3];
 volatile unsigned char buff_tgt[4];
 volatile unsigned char buff_en[1];
@@ -114,11 +118,57 @@ const uint8_t DXL_ID = 1;
 const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
 
-void mcpISR(){
-  struct can_frame recvMsg;
-    
-  if(mcp2515.readMessage(&recvMsg) == MCP2515::ERROR_OK)
-  {
+void debug_println(char *str) {
+  if (!DEBUG) return;
+  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
+  Serial.println(str);
+  xSemaphoreGive(semaphoreSerial);
+}
+
+void debug_println(int num) {
+  if (!DEBUG) return;
+  xSemaphoreTake(semaphoreSerial, portMAX_DELAY);
+  Serial.println(num);
+  xSemaphoreGive(semaphoreSerial);
+}
+
+void mcpISR() {
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  xSemaphoreGiveFromISR(semaphoreCanISR, &xHigherPriorityTaskWoken);
+  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+void task_read(void *pvParameters) {
+  while(1) {
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    uint8_t irq = mcp2515.getInterrupts();
+    xSemaphoreGive(semaphoreCanIO);
+
+    struct can_frame recvMsg;
+    // read from RXB0 or RXB1 if any available data
+    // otherwise wait for next interrupt
+    if (irq & MCP2515::CANINTF_RX0IF) {
+      debug_println("task_read0");
+      // frame contains received from RXB0 message
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
+      xSemaphoreGive(semaphoreCanIO);
+    }
+    else if (irq & MCP2515::CANINTF_RX1IF) {
+      debug_println("task_read1");
+      // frame contains received from RXB1 message
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
+      xSemaphoreGive(semaphoreCanIO);
+    }
+    else {
+      debug_println("task_read wait");
+      // wait for interrupt
+      xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
+      // process data in the next loop
+      continue;
+    }
+
     if(recvMsg.can_id == ADDR_VIB)
     {
       buff_vib[0] = recvMsg.data[0];
@@ -129,7 +179,7 @@ void mcpISR(){
       vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
       vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
     }
-    if(recvMsg.can_id == ADDR_SERVO_TGT)
+    else if(recvMsg.can_id == ADDR_SERVO_TGT)
     {
       if(servo_enable)
       {
@@ -141,7 +191,7 @@ void mcpISR(){
         servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
       }
     }
-    if(recvMsg.can_id == ADDR_SERVO_EN)
+    else if(recvMsg.can_id == ADDR_SERVO_EN)
     {
       if(servo_enable)
       {
@@ -149,38 +199,33 @@ void mcpISR(){
         onoff_recived = true;
       }
     }
-      
-    if(recvMsg.can_id == ADDR_CAP_WR1)
+    else if(recvMsg.can_id == ADDR_CAP_WR1)
     {
       buff_wr1[0] = recvMsg.data[0];
       cap_sens.setCalibrationStatusReg(buff_wr1[0]);
     }
-      
-    if(recvMsg.can_id == ADDR_CAP_WR2)
+    else if(recvMsg.can_id == ADDR_CAP_WR2)
     {
       buff_wr2[0] = recvMsg.data[0];
       cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
     }
-      
-    if(recvMsg.can_id == ADDR_CAP_WR3)
+    else if(recvMsg.can_id == ADDR_CAP_WR3)
     {
       buff_wr3[0] = recvMsg.data[0];
       cap_sens.setSensorInputEnableReg(buff_wr3[0]);
     }
-
-    if(recvMsg.can_id == ADDR_CAP_WR4)
+    else if(recvMsg.can_id == ADDR_CAP_WR4)
     {
       buff_wr4[0] = recvMsg.data[0];
       cap_sens.setConfigurationReg(buff_wr4[0]);
     }
-
-    if(recvMsg.can_id == ADDR_CAP_WR5)
+    else if(recvMsg.can_id == ADDR_CAP_WR5)
     {
       buff_wr5[0] = recvMsg.data[0];
       cap_sens.setConfiguration2Reg(buff_wr5[0]);
     }
+    //mcp2515.clearInterrupts();
   }
-  mcp2515.clearInterrupts();
 }
 
 void task2ms(void *pvParameters)
@@ -317,11 +362,9 @@ void task20ms(void *pvParameters)
     sendMsg.data[1] = (tof & 0xff00) >> 8;
     sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
     sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
-    cap_sens.setMainControlReg(false, false, false);
-    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
-    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
 
     sendMsg.can_id = ADDR_CAP_STAT;
@@ -329,10 +372,9 @@ void task20ms(void *pvParameters)
     sendMsg.data[0] = cap_sens.getGeneralStatusReg();
     sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
     sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
-    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
-    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
     
     data_tact[0] = sw_right << 0
@@ -344,13 +386,12 @@ void task20ms(void *pvParameters)
     sendMsg.can_id = ADDR_TACT;
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = data_tact[0];
-    detachInterrupt(digitalPinToInterrupt(SPI_INT));
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
-    if(digitalRead(SPI_INT) == LOW){mcpISR();}
+    xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
 
-    Serial.println(tof);
+    debug_println(tof);
 
     if(servo_enable)
     {
@@ -377,10 +418,9 @@ void task20ms(void *pvParameters)
       sendMsg.data[1] = (angle & 0x0000ff00) >> 8;
       sendMsg.data[2] = (angle & 0x00ff0000) >> 16;
       sendMsg.data[3] = (angle & 0xff000000) >> 24;
-      detachInterrupt(digitalPinToInterrupt(SPI_INT));
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING); 
-      if(digitalRead(SPI_INT) == LOW){mcpISR();}
+      xSemaphoreGive(semaphoreCanIO);
     }
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -457,12 +497,18 @@ void setup()
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
-  Serial.println("CAN OK");
+
+  semaphoreCanISR = xSemaphoreCreateBinary();
+  semaphoreSerial = xSemaphoreCreateBinary();
+  semaphoreCanIO = xSemaphoreCreateBinary();
+
+  debug_println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
 
   xTaskCreate(task2ms,  "task2ms",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task10ms, "task10ms", configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
   xTaskCreate(task20ms, "task20ms", configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
+  xTaskCreate(task_read,"task_read",configMINIMAL_STACK_SIZE, NULL, 10, NULL);
 
   vTaskStartScheduler(); 
 }
