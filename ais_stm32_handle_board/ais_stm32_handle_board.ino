@@ -502,7 +502,7 @@ void setup()
   pinMode(SPI_INT, INPUT);
 
   semaphoreCanISR = xSemaphoreCreateBinary();
-  semaphoreSerialCanIO = xSemaphoreCreateBinary();
+  semaphoreSerialCanIO = xSemaphoreCreateMutex();
 
   debug_println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
