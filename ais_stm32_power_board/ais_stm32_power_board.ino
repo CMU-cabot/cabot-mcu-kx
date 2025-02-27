@@ -551,7 +551,7 @@ void setup()
 
   semaphoreSequence = xSemaphoreCreateBinary();
   semaphoreCanISR = xSemaphoreCreateBinary();
-  semaphoreSerialCanIO = xSemaphoreCreateBinary();
+  semaphoreSerialCanIO = xSemaphoreCreateMutex();
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
