@@ -18,6 +18,7 @@ function help() {
     echo "-h         show this help"
     echo "-b <board> set board (default=STMicroelectronics:stm32:GenF3)"
     echo "-p <port>  set port (default=)"
+    echo "-d         debug mode (Seria.print)"
 }
 
 : ${ARDUINO_BOARD:="STMicroelectronics:stm32:GenF3"}
@@ -25,8 +26,9 @@ function help() {
 
 board=$ARDUINO_BOARD
 port=$ARDUINO_PORT
+debug=
 
-while getopts "hb:p:" arg; do
+while getopts "hb:p:d" arg; do
     case $arg in
 	h)
 	    help
@@ -38,6 +40,9 @@ while getopts "hb:p:" arg; do
 	p)
 	    port=$OPTARG
 	    ;;
+    d)
+        debug="--build-property build.extra_flags=-DDEBUG=1"
+        ;;
     esac
 done
 shift $((OPTIND-1))
@@ -49,8 +54,8 @@ fi
 
 function build() {
     echo "building..."
-    echo "arduino-cli compile -b $board ."
-    arduino-cli compile -b $board .
+    echo "arduino-cli compile -b $board $debug ."
+    arduino-cli compile -b $board $debug .
 
     if [ $? -ne 0 ]; then
 	err "Please check board ($board)"
