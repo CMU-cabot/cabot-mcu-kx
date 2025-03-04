@@ -72,7 +72,9 @@ Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 cap1203 cap_sens(&Wire);
 
 volatile SemaphoreHandle_t semaphoreCanISR;
-volatile SemaphoreHandle_t semaphoreSerialCanIO;
+volatile SemaphoreHandle_t semaphoreSerialIO;
+volatile SemaphoreHandle_t semaphoreCanIO;
+volatile SemaphoreHandle_t semaphoreCap1203IO;
 
 volatile unsigned char buff_vib[3];
 volatile unsigned char buff_tgt[4];
@@ -123,16 +125,16 @@ using namespace ControlTableItem;
 
 void debug_println(char *str) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialIO, portMAX_DELAY);
   Serial.println(str);
-  xSemaphoreGive(semaphoreSerialCanIO);
+  xSemaphoreGive(semaphoreSerialIO);
 }
 
 void debug_println(int num) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialIO, portMAX_DELAY);
   Serial.println(num);
-  xSemaphoreGive(semaphoreSerialCanIO);
+  xSemaphoreGive(semaphoreSerialIO);
 }
 
 void mcpISR() {
@@ -143,9 +145,9 @@ void mcpISR() {
 
 void task_read(void *pvParameters) {
   while(1) {
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     uint8_t irq = mcp2515.getInterrupts();
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
 
     struct can_frame recvMsg;
     // read from RXB0 or RXB1 if any available data
@@ -153,16 +155,16 @@ void task_read(void *pvParameters) {
     if (irq & MCP2515::CANINTF_RX0IF) {
       debug_println("task_read0");
       // frame contains received from RXB0 message
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
     }
     else if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
     }
     else {
       debug_println("task_read wait");
@@ -205,27 +207,37 @@ void task_read(void *pvParameters) {
     else if(recvMsg.can_id == ADDR_CAP_WR1)
     {
       buff_wr1[0] = recvMsg.data[0];
+      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
       cap_sens.setCalibrationStatusReg(buff_wr1[0]);
+      xSemaphoreGive(semaphoreCap1203IO);
     }
     else if(recvMsg.can_id == ADDR_CAP_WR2)
     {
       buff_wr2[0] = recvMsg.data[0];
+      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
       cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
+      xSemaphoreGive(semaphoreCap1203IO);
     }
     else if(recvMsg.can_id == ADDR_CAP_WR3)
     {
       buff_wr3[0] = recvMsg.data[0];
+      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
       cap_sens.setSensorInputEnableReg(buff_wr3[0]);
+      xSemaphoreGive(semaphoreCap1203IO);
     }
     else if(recvMsg.can_id == ADDR_CAP_WR4)
     {
       buff_wr4[0] = recvMsg.data[0];
+      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
       cap_sens.setConfigurationReg(buff_wr4[0]);
+      xSemaphoreGive(semaphoreCap1203IO);
     }
     else if(recvMsg.can_id == ADDR_CAP_WR5)
     {
       buff_wr5[0] = recvMsg.data[0];
+      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
       cap_sens.setConfiguration2Reg(buff_wr5[0]);
+      xSemaphoreGive(semaphoreCap1203IO);
     }
     //mcp2515.clearInterrupts();
   }
@@ -363,21 +375,25 @@ void task20ms(void *pvParameters)
     sendMsg.can_dlc = 4;
     sendMsg.data[0] = (tof & 0x00ff) >> 0;
     sendMsg.data[1] = (tof & 0xff00) >> 8;
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
     sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
     sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
 
     sendMsg.can_id = ADDR_CAP_STAT;
     sendMsg.can_dlc = 3;
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
     sendMsg.data[0] = cap_sens.getGeneralStatusReg();
     sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
     sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
     
     data_tact[0] = sw_right << 0
@@ -389,9 +405,9 @@ void task20ms(void *pvParameters)
     sendMsg.can_id = ADDR_TACT;
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = data_tact[0];
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
 
     debug_println(tof);
@@ -421,9 +437,9 @@ void task20ms(void *pvParameters)
       sendMsg.data[1] = (angle & 0x0000ff00) >> 8;
       sendMsg.data[2] = (angle & 0x00ff0000) >> 16;
       sendMsg.data[3] = (angle & 0xff000000) >> 24;
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
     }
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -502,7 +518,9 @@ void setup()
   pinMode(SPI_INT, INPUT);
 
   semaphoreCanISR = xSemaphoreCreateBinary();
-  semaphoreSerialCanIO = xSemaphoreCreateMutex();
+  semaphoreSerialIO = xSemaphoreCreateMutex();
+  semaphoreCanIO = xSemaphoreCreateMutex();
+  semaphoreCap1203IO = xSemaphoreCreateMutex();
 
   debug_println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
