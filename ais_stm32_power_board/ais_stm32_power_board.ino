@@ -151,8 +151,29 @@ uint16_t readWord(uint8_t addr)
   Wire.write(addr);
   Wire.endTransmission(false);
   Wire.requestFrom(SMBUS_BATT, 2, true);
-  ret = Wire.read();
-  ret |= Wire.read()<<8;
+  int first = Wire.read();
+  int second = Wire.read();
+  if (first < 0 || second < 0) {
+    return 0xFFFF;  // least possible value
+  }
+  ret = (0xFF & first) | (0xFF & second) << 8;
+  delayMicroseconds(5);
+  return ret;
+}
+
+int16_t readWordSigned(uint8_t addr)
+{
+  int16_t ret = 0;
+  Wire.beginTransmission(SMBUS_BATT);
+  Wire.write(addr);
+  Wire.endTransmission(false);
+  Wire.requestFrom(SMBUS_BATT, 2, true);
+  int first = Wire.read();
+  int second = Wire.read();
+  if (first < 0 || second < 0) {
+    return 0x7FFF;  // least possible value
+  }
+  ret = (0xFF & first) | (0xFF & second) << 8;
   delayMicroseconds(5);
   return ret;
 }
@@ -413,7 +434,7 @@ void task_send(void *pvParameters)
     vTaskDelay(1);
 
     uint16_t voltage  = 0;
-    uint16_t current  = 0;
+    int16_t current  = 0;
     uint16_t charge   = 0;
     uint16_t temp     = 0;
     uint16_t sn       = 0;
@@ -441,7 +462,7 @@ void task_send(void *pvParameters)
       debug_println(reset_count);
 
       voltage = readWord(SMBUS_VOLTAGE); //Voltage[mV]
-      current = readWord(SMBUS_CULLENT); //Current[mA]
+      current = readWordSigned(SMBUS_CULLENT); //Current[mA]
       charge  = readWord(SMBUS_CHARGE);  //RelativeStateOfCharge[%]
       temp    = readWord(SMBUS_TEMP);    //Temperature[0.1k]
       sn      = readWord(SMBUS_SERIAL);  //SerialNumber
