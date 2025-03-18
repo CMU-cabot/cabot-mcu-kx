@@ -430,6 +430,9 @@ void task_send(void *pvParameters)
       debug_print(i);
       debug_print(" ");
       debug_println(err);
+      if (!DEBUG) {
+        vTaskDelay(1);
+      }
       
       err = checkSlave(SMBUS_BATT);
       debug_print("batt ");
@@ -439,6 +442,9 @@ void task_send(void *pvParameters)
 
       debug_print("reset ");
       debug_println(reset_count);
+      if (!DEBUG) {
+        vTaskDelay(1);
+      }
 
       voltage = readWord(SMBUS_VOLTAGE); //Voltage[mV]
       current = readWord(SMBUS_CULLENT); //Current[mA]
