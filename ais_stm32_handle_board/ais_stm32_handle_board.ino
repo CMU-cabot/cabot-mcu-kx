@@ -143,6 +143,75 @@ void mcpISR() {
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+void process_message(struct can_frame recvMsg) {
+  if(recvMsg.can_id == ADDR_VIB)
+  {
+    buff_vib[0] = recvMsg.data[0];
+    buff_vib[1] = recvMsg.data[1];
+    buff_vib[2] = recvMsg.data[2];
+
+    vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
+    vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
+    vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
+  }
+  else if(recvMsg.can_id == ADDR_SERVO_TGT)
+  {
+    if(servo_enable)
+    {
+      buff_tgt[0] = recvMsg.data[0];
+      buff_tgt[1] = recvMsg.data[1];
+      buff_tgt[2] = recvMsg.data[2];
+      buff_tgt[3] = recvMsg.data[3];
+
+      servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
+    }
+  }
+  else if(recvMsg.can_id == ADDR_SERVO_EN)
+  {
+    if(servo_enable)
+    {
+      buff_en[0] = recvMsg.data[0];
+      onoff_recived = true;
+    }
+  }
+  else if(recvMsg.can_id == ADDR_CAP_WR1)
+  {
+    buff_wr1[0] = recvMsg.data[0];
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    cap_sens.setCalibrationStatusReg(buff_wr1[0]);
+    xSemaphoreGive(semaphoreCap1203IO);
+  }
+  else if(recvMsg.can_id == ADDR_CAP_WR2)
+  {
+    buff_wr2[0] = recvMsg.data[0];
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
+    xSemaphoreGive(semaphoreCap1203IO);
+  }
+  else if(recvMsg.can_id == ADDR_CAP_WR3)
+  {
+    buff_wr3[0] = recvMsg.data[0];
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    cap_sens.setSensorInputEnableReg(buff_wr3[0]);
+    xSemaphoreGive(semaphoreCap1203IO);
+  }
+  else if(recvMsg.can_id == ADDR_CAP_WR4)
+  {
+    buff_wr4[0] = recvMsg.data[0];
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    cap_sens.setConfigurationReg(buff_wr4[0]);
+    xSemaphoreGive(semaphoreCap1203IO);
+  }
+  else if(recvMsg.can_id == ADDR_CAP_WR5)
+  {
+    buff_wr5[0] = recvMsg.data[0];
+    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    cap_sens.setConfiguration2Reg(buff_wr5[0]);
+    xSemaphoreGive(semaphoreCap1203IO);
+  }
+  //mcp2515.clearInterrupts();
+}
+
 void task_read(void *pvParameters) {
   while(1) {
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
@@ -158,88 +227,23 @@ void task_read(void *pvParameters) {
       xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
       xSemaphoreGive(semaphoreCanIO);
+      process_message(recvMsg);
     }
-    else if (irq & MCP2515::CANINTF_RX1IF) {
+    if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
       xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
       xSemaphoreGive(semaphoreCanIO);
-    }
-    else {
-      debug_println("task_read wait");
-      // wait for interrupt
-      xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
-      // process data in the next loop
-      continue;
+      process_message(recvMsg);
     }
 
-    if(recvMsg.can_id == ADDR_VIB)
-    {
-      buff_vib[0] = recvMsg.data[0];
-      buff_vib[1] = recvMsg.data[1];
-      buff_vib[2] = recvMsg.data[2];
-        
-      vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
-      vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
-      vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
-    }
-    else if(recvMsg.can_id == ADDR_SERVO_TGT)
-    {
-      if(servo_enable)
-      {
-        buff_tgt[0] = recvMsg.data[0];
-        buff_tgt[1] = recvMsg.data[1];
-        buff_tgt[2] = recvMsg.data[2];
-        buff_tgt[3] = recvMsg.data[3];
-          
-        servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
-      }
-    }
-    else if(recvMsg.can_id == ADDR_SERVO_EN)
-    {
-      if(servo_enable)
-      {
-        buff_en[0] = recvMsg.data[0];
-        onoff_recived = true;
-      }
-    }
-    else if(recvMsg.can_id == ADDR_CAP_WR1)
-    {
-      buff_wr1[0] = recvMsg.data[0];
-      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-      cap_sens.setCalibrationStatusReg(buff_wr1[0]);
-      xSemaphoreGive(semaphoreCap1203IO);
-    }
-    else if(recvMsg.can_id == ADDR_CAP_WR2)
-    {
-      buff_wr2[0] = recvMsg.data[0];
-      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-      cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
-      xSemaphoreGive(semaphoreCap1203IO);
-    }
-    else if(recvMsg.can_id == ADDR_CAP_WR3)
-    {
-      buff_wr3[0] = recvMsg.data[0];
-      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-      cap_sens.setSensorInputEnableReg(buff_wr3[0]);
-      xSemaphoreGive(semaphoreCap1203IO);
-    }
-    else if(recvMsg.can_id == ADDR_CAP_WR4)
-    {
-      buff_wr4[0] = recvMsg.data[0];
-      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-      cap_sens.setConfigurationReg(buff_wr4[0]);
-      xSemaphoreGive(semaphoreCap1203IO);
-    }
-    else if(recvMsg.can_id == ADDR_CAP_WR5)
-    {
-      buff_wr5[0] = recvMsg.data[0];
-      xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-      cap_sens.setConfiguration2Reg(buff_wr5[0]);
-      xSemaphoreGive(semaphoreCap1203IO);
-    }
-    //mcp2515.clearInterrupts();
+    mcp2515.clearRXnOVR();
+    debug_println("task_read wait");
+    // wait for interrupt
+    xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
+    // process data in the next loop
+    continue;
   }
 }
 

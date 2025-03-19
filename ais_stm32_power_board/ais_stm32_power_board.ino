@@ -188,6 +188,56 @@ void mcpISR() {
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+void process_message(struct can_frame recvMsg) {
+  // process recvMsg
+  if(recvMsg.can_id == ADDR_ODRIVE)
+  {
+    buff_odrive[0] = recvMsg.data[0];
+    (buff_odrive[0]&0x01 == 0x01) ? (digitalWrite(G_24V, HIGH)) : (digitalWrite(G_24V, LOW));
+    if(buff_odrive[0]&0x01 == 0x01 && flag_emergency == true)
+    {
+      flag_emergency = false;
+    }
+  }
+  else if(recvMsg.can_id == ADDR_PC)
+  {
+    buff_pc[0] = recvMsg.data[0];
+    if(buff_pc[0] == 0x00)
+    {
+      task_shutdown();
+    }
+    if(buff_pc[0] == 0x01)
+    {
+      task_poweron();
+    }
+  }
+  else if(recvMsg.can_id == ADDR_D455_1)
+  {
+    buff_d455_1[0] = recvMsg.data[0];
+    (buff_d455_1[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_1, HIGH)) : (digitalWrite(G_12V_D455_1, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_D455_2)
+  {
+    buff_d455_2[0] = recvMsg.data[0];
+    (buff_d455_2[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_2, HIGH)) : (digitalWrite(G_12V_D455_2, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_D455_3)
+  {
+    buff_d455_3[0] = recvMsg.data[0];
+    (buff_d455_3[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_3, HIGH)) : (digitalWrite(G_12V_D455_3, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_MCU)
+  {
+    buff_mcu[0] = recvMsg.data[0];
+    (buff_mcu[0]&0x01 == 0x01) ? (digitalWrite(G_5V_MCU, HIGH)) : (digitalWrite(G_5V_MCU, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_PWM)
+  {
+    buff_pwm[0] = recvMsg.data[0];
+    analogWrite(PWM_FAN, 255 - buff_pwm[0]);
+  }
+}
+
 void task_read(void *pvParameters) {
   while(1) {
     xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
@@ -203,71 +253,22 @@ void task_read(void *pvParameters) {
       xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
       xSemaphoreGive(semaphoreSerialCanIO);
+      process_message(recvMsg);
     }
-    else if (irq & MCP2515::CANINTF_RX1IF) {
+    if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
       xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
       xSemaphoreGive(semaphoreSerialCanIO);
-    }
-    else {
-      debug_println("task_read wait");
-      // wait for interrupt
-      xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
-      // process data in the next loop
-      continue;
+      process_message(recvMsg);
     }
 
-    // process recvMsg
-    if(recvMsg.can_id == ADDR_ODRIVE)
-    {
-      buff_odrive[0] = recvMsg.data[0];
-      (buff_odrive[0]&0x01 == 0x01) ? (digitalWrite(G_24V, HIGH)) : (digitalWrite(G_24V, LOW));
-      if(buff_odrive[0]&0x01 == 0x01 && flag_emergency == true)
-      {
-        flag_emergency = false;
-      }
-    }
-    else if(recvMsg.can_id == ADDR_PC)
-    {
-      buff_pc[0] = recvMsg.data[0];
-      if(buff_pc[0] == 0x00)
-      {
-        task_shutdown();
-      }
-      if(buff_pc[0] == 0x01)
-      {
-        task_poweron();
-      }
-    }
-    else if(recvMsg.can_id == ADDR_D455_1)
-    {
-      buff_d455_1[0] = recvMsg.data[0];
-      (buff_d455_1[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_1, HIGH)) : (digitalWrite(G_12V_D455_1, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_D455_2)
-    {
-      buff_d455_2[0] = recvMsg.data[0];
-      (buff_d455_2[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_2, HIGH)) : (digitalWrite(G_12V_D455_2, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_D455_3)
-    {
-      buff_d455_3[0] = recvMsg.data[0];
-      (buff_d455_3[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_3, HIGH)) : (digitalWrite(G_12V_D455_3, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_MCU)
-    {
-      buff_mcu[0] = recvMsg.data[0];
-      (buff_mcu[0]&0x01 == 0x01) ? (digitalWrite(G_5V_MCU, HIGH)) : (digitalWrite(G_5V_MCU, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_PWM)
-    {
-      buff_pwm[0] = recvMsg.data[0];
-      analogWrite(PWM_FAN, 255 - buff_pwm[0]);
-    }
-    // is this required? readMessage will off the flag
-    // mcp2515.clearInterrupts();
+    mcp2515.clearRXnOVR();
+    debug_println("task_read wait");
+    // wait for interrupt
+    xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
+    // process data in the next loop
   }
 }
 
