@@ -58,8 +58,10 @@
 #define ADDR_BAT_3    0x51a   // 0b1 010 0011 010  Battery3 status
 #define ADDR_BAT_4    0x51b   // 0b1 010 0011 011  Battery4 status
 #define ADDR_BAT_SN   0x520   // 0b1 010 0100 000  Battery serial No.
-#define CAN_FILTER    0x01080000  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
-#define CAN_MASK      0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
+#define CAN_FILTER0   0x01080000  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
+#define CAN_FILTER1   0x07ff0000  // 0b1 111 1111 111 disable filter
+#define CAN_MASK0     0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
+#define CAN_MASK1     0x00000000  // 0b0 000 0000 000 disable filter
 #define SHUTDOWN_PC   60000   // pc shutdown wait time[ms](Not used)
 #define SHUTDOWN_FRC  120000  // force shutdown time[ms]
 
@@ -545,8 +547,10 @@ void setup()
   mcp2515.reset();
   mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
   
-  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK);
-  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER);
+  mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK0);
+  mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER0);
+  mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
+  mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER1);
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
