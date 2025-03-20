@@ -425,20 +425,21 @@ void task_send(void *pvParameters)
       
       int err = 0;
       err = checkSlave(SMBUS_MUX);
-
-      debug_print("mux  ");
-      debug_print(i);
-      debug_print(" ");
-      debug_println(err);
+      vTaskDelay(5);
+      // debug_print("mux  ");
+      // debug_print(i);
+      // debug_print(" ");
+      // debug_println(err);
       
       err = checkSlave(SMBUS_BATT);
-      debug_print("batt ");
-      debug_print(i);
-      debug_print(" ");
-      debug_println(err);
+      vTaskDelay(5);
+      // debug_print("batt ");
+      // debug_print(i);
+      // debug_print(" ");
+      // debug_println(err);
 
-      debug_print("reset ");
-      debug_println(reset_count);
+      // debug_print("reset ");
+      // debug_println(reset_count);
 
       voltage = readWord(SMBUS_VOLTAGE); //Voltage[mV]
       current = readWord(SMBUS_CULLENT); //Current[mA]
