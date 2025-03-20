@@ -56,10 +56,10 @@
 #define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
 #define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
 
-#define CAN_FILTER0     0x00900000  // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
-#define CAN_FILTER1     0x04800000  // 0b1 001 0000 000 filter for ADDR_CAP_WR*
-#define CAN_MASK0       0x07f00000  // 0b1 111 1110 000 mask by priority, major, minor (upper 3bit)
-#define CAN_MASK1       0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
+#define CAN_FILTER0     0x0090      // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
+#define CAN_FILTER1     0x0480      // 0b1 001 0000 000 filter for ADDR_CAP_WR*
+#define CAN_MASK0       0x07f0      // 0b1 111 1110 000 mask by priority, major, minor (upper 3bit)
+#define CAN_MASK1       0x07f8      // 0b1 111 1111 000 mask by priority, major, minor
 
 #ifndef DEBUG                 // you can set DEBUG=1 to print debug message via Serial
 #define DEBUG 0
