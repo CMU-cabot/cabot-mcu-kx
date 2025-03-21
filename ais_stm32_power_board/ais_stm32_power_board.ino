@@ -572,9 +572,16 @@ void setup()
   vTaskStartScheduler(); 
 }
 
+int loop_count = 0;
+
 void loop()
 {
-  //debug_println("loop");
+  loop_count++;
+  if (loop_count > 1000) {
+    loop_count = 0;
+    debug_println("loop");
+  }
+
   if(digitalRead(SW_EW) == LOW && flag_emergency == false && flag_power_on == true)
   {
     task_emergency();

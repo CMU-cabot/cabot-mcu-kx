@@ -251,6 +251,8 @@ void process_message(struct can_frame recvMsg) {
   }
 }
 
+int task2ms_count = 0;
+
 void task2ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -258,6 +260,11 @@ void task2ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
+    task2ms_count += xFrequency;
+    if (task2ms_count > 1000) {
+      task2ms_count = 0;
+      debug_println("task2ms");
+    }
     bool sw_r = digitalRead(SW_RIGHT);
     bool sw_l = digitalRead(SW_LEFT);
     bool sw_u = digitalRead(SW_UP);
@@ -351,6 +358,8 @@ void task2ms(void *pvParameters)
   }
 }
 
+int task10ms_count = 0;
+
 void task10ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -358,6 +367,11 @@ void task10ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
+    task10ms_count += xFrequency;
+    if (task10ms_count > 1000) {
+      task10ms_count = 0;
+      debug_println("task10ms");
+    }
     if(vib0_count>0){digitalWrite(VIB_0, HIGH);vib0_count--;}
     else{digitalWrite(VIB_0, LOW);}
     if(vib1_count>0){digitalWrite(VIB_1, HIGH);vib1_count--;}
@@ -369,6 +383,8 @@ void task10ms(void *pvParameters)
   }
 }
 
+int task20ms_count = 0;
+
 void task20ms(void *pvParameters)
 {
   portTickType xLastWakeTime;
@@ -376,6 +392,11 @@ void task20ms(void *pvParameters)
   xLastWakeTime = xTaskGetTickCount();
   while(1)
   {
+    task20ms_count += xFrequency;
+    if (task20ms_count > 1000) {
+      task20ms_count = 0;
+      debug_println("task20ms");
+    }
     struct can_frame sendMsg;
     uint16_t tof;
     tof = lox.readRangeResult();
@@ -419,7 +440,7 @@ void task20ms(void *pvParameters)
     xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
 
-    debug_println(tof);
+    // debug_println(tof);
 
     if(servo_enable)
     {
