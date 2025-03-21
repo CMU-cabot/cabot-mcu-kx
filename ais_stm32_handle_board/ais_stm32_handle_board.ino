@@ -386,6 +386,7 @@ void task20ms(void *pvParameters)
     xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
     sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
     sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
+    cap_sens.setMainControlReg(false, false, false);
     xSemaphoreGive(semaphoreCap1203IO);
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
