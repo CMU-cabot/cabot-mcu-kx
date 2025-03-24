@@ -122,8 +122,8 @@ void setup()
 
   mcp2515.reset();
   mcp2515.setBitrate(CAN_1000KBPS, MCP_20MHZ);
-  mcp2515.setFilterMask(MCP2515::MASK0, false, 0x07ff0000);
-  mcp2515.setFilter(MCP2515::RXF0, false, 0x00000000);
+  mcp2515.setFilterMask(MCP2515::MASK0, false, 0x07ff);  // filter only ID=0
+  mcp2515.setFilterMask(MCP2515::MASK1, false, 0x07ff);  // filter only ID=0
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
 
