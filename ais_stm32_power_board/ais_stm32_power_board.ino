@@ -58,8 +58,8 @@
 #define ADDR_BAT_3    0x51a   // 0b1 010 0011 010  Battery3 status
 #define ADDR_BAT_4    0x51b   // 0b1 010 0011 011  Battery4 status
 #define ADDR_BAT_SN   0x520   // 0b1 010 0100 000  Battery serial No.
-#define CAN_FILTER    0x01080000  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
-#define CAN_MASK      0x07f80000  // 0b1 111 1111 000 mask by priority, major, minor
+#define CAN_FILTER    0x0108  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
+#define CAN_MASK      0x07f8  // 0b1 111 1111 000 mask by priority, major, minor
 #define SHUTDOWN_PC   60000   // pc shutdown wait time[ms](Not used)
 #define SHUTDOWN_FRC  120000  // force shutdown time[ms]
 
@@ -71,7 +71,8 @@ MCP2515 mcp2515(SPI_CS_PIN);
 
 volatile SemaphoreHandle_t semaphoreSequence;
 volatile SemaphoreHandle_t semaphoreCanISR;
-volatile SemaphoreHandle_t semaphoreSerialCanIO;
+volatile SemaphoreHandle_t semaphoreSerialIO;
+volatile SemaphoreHandle_t semaphoreCanIO;
 
 volatile bool flag_power_on   = false;
 volatile bool flag_shutdown   = false;
@@ -97,30 +98,30 @@ int reset_count = 0;
 
 void debug_print(char *str) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialIO, portMAX_DELAY);
   Serial.print(str);
-  xSemaphoreGive(semaphoreSerialCanIO);
+  xSemaphoreGive(semaphoreSerialIO);
 }
 
 void debug_println(char *str) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialIO, portMAX_DELAY);
   Serial.println(str);
-  xSemaphoreGive(semaphoreSerialCanIO);
+  xSemaphoreGive(semaphoreSerialIO);
 }
 
 void debug_print(int num) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialIO, portMAX_DELAY);
   Serial.print(num);
-  xSemaphoreGive(semaphoreSerialCanIO);
+  xSemaphoreGive(semaphoreSerialIO);
 }
 
 void debug_println(int num) {
   if (!DEBUG) return;
-  xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+  xSemaphoreTake(semaphoreSerialIO, portMAX_DELAY);
   Serial.println(num);
-  xSemaphoreGive(semaphoreSerialCanIO);
+  xSemaphoreGive(semaphoreSerialIO);
 }
 
 void setChannel(uint8_t ch)
@@ -186,86 +187,93 @@ void mcpISR() {
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+int task_read_count = 0;
+
 void task_read(void *pvParameters) {
   while(1) {
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     uint8_t irq = mcp2515.getInterrupts();
-    xSemaphoreGive(semaphoreSerialCanIO);
+    // ensure that the interrupt is cleared and will get next mcpISR call
+    mcp2515.clearInterrupts();
+    xSemaphoreGive(semaphoreCanIO);
 
     struct can_frame recvMsg;
-    // read from RXB0 or RXB1 if any available data
-    // otherwise wait for next interrupt
+    // read from RXB0 and RXB1 if any available data
+    // then wait for the next interrupt
     if (irq & MCP2515::CANINTF_RX0IF) {
       debug_println("task_read0");
       // frame contains received from RXB0 message
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
+      process_message(recvMsg);
     }
-    else if (irq & MCP2515::CANINTF_RX1IF) {
+    if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
+      process_message(recvMsg);
     }
-    else {
+    task_read_count++;
+    if (task_read_count > 1000)
+    {
+      task_read_count = 0;
       debug_println("task_read wait");
-      // wait for interrupt
-      xSemaphoreTake(semaphoreCanISR, portMAX_DELAY);
-      // process data in the next loop
-      continue;
     }
+    // wait for a tick, just in case the interrupt is not fired somehow
+    xSemaphoreTake(semaphoreCanISR, 1);
+  }
+}
 
-    // process recvMsg
-    if(recvMsg.can_id == ADDR_ODRIVE)
+void process_message(struct can_frame recvMsg) {
+  // process recvMsg
+  if(recvMsg.can_id == ADDR_ODRIVE)
+  {
+    buff_odrive[0] = recvMsg.data[0];
+    (buff_odrive[0]&0x01 == 0x01) ? (digitalWrite(G_24V, HIGH)) : (digitalWrite(G_24V, LOW));
+    if(buff_odrive[0]&0x01 == 0x01 && flag_emergency == true)
     {
-      buff_odrive[0] = recvMsg.data[0];
-      (buff_odrive[0]&0x01 == 0x01) ? (digitalWrite(G_24V, HIGH)) : (digitalWrite(G_24V, LOW));
-      if(buff_odrive[0]&0x01 == 0x01 && flag_emergency == true)
-      {
-        flag_emergency = false;
-      }
+      flag_emergency = false;
     }
-    else if(recvMsg.can_id == ADDR_PC)
+  }
+  else if(recvMsg.can_id == ADDR_PC)
+  {
+    buff_pc[0] = recvMsg.data[0];
+    if(buff_pc[0] == 0x00)
     {
-      buff_pc[0] = recvMsg.data[0];
-      if(buff_pc[0] == 0x00)
-      {
-        task_shutdown();
-      }
-      if(buff_pc[0] == 0x01)
-      {
-        task_poweron();
-      }
+      task_shutdown();
     }
-    else if(recvMsg.can_id == ADDR_D455_1)
+    if(buff_pc[0] == 0x01)
     {
-      buff_d455_1[0] = recvMsg.data[0];
-      (buff_d455_1[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_1, HIGH)) : (digitalWrite(G_12V_D455_1, LOW));
+      task_poweron();
     }
-    else if(recvMsg.can_id == ADDR_D455_2)
-    {
-      buff_d455_2[0] = recvMsg.data[0];
-      (buff_d455_2[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_2, HIGH)) : (digitalWrite(G_12V_D455_2, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_D455_3)
-    {
-      buff_d455_3[0] = recvMsg.data[0];
-      (buff_d455_3[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_3, HIGH)) : (digitalWrite(G_12V_D455_3, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_MCU)
-    {
-      buff_mcu[0] = recvMsg.data[0];
-      (buff_mcu[0]&0x01 == 0x01) ? (digitalWrite(G_5V_MCU, HIGH)) : (digitalWrite(G_5V_MCU, LOW));
-    }
-    else if(recvMsg.can_id == ADDR_PWM)
-    {
-      buff_pwm[0] = recvMsg.data[0];
-      analogWrite(PWM_FAN, 255 - buff_pwm[0]);
-    }
-    // is this required? readMessage will off the flag
-    // mcp2515.clearInterrupts();
+  }
+  else if(recvMsg.can_id == ADDR_D455_1)
+  {
+    buff_d455_1[0] = recvMsg.data[0];
+    (buff_d455_1[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_1, HIGH)) : (digitalWrite(G_12V_D455_1, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_D455_2)
+  {
+    buff_d455_2[0] = recvMsg.data[0];
+    (buff_d455_2[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_2, HIGH)) : (digitalWrite(G_12V_D455_2, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_D455_3)
+  {
+    buff_d455_3[0] = recvMsg.data[0];
+    (buff_d455_3[0]&0x01 == 0x01) ? (digitalWrite(G_12V_D455_3, HIGH)) : (digitalWrite(G_12V_D455_3, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_MCU)
+  {
+    buff_mcu[0] = recvMsg.data[0];
+    (buff_mcu[0]&0x01 == 0x01) ? (digitalWrite(G_5V_MCU, HIGH)) : (digitalWrite(G_5V_MCU, LOW));
+  }
+  else if(recvMsg.can_id == ADDR_PWM)
+  {
+    buff_pwm[0] = recvMsg.data[0];
+    analogWrite(PWM_FAN, 255 - buff_pwm[0]);
   }
 }
 
@@ -281,9 +289,9 @@ void task_emergency()
     sendMsg.can_dlc = 1;
     sendMsg.data[0] = 0x01;
 
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
   }
 }
 
@@ -329,9 +337,9 @@ void task_sequence(void *pvParameters)
     if(flag_power_on == true && flag_shutdown == false)
     {
       sendMsg.data[0] = 0x01;
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
 
       digitalWrite(G_24V, HIGH);
       vTaskDelay(100);
@@ -354,9 +362,9 @@ void task_sequence(void *pvParameters)
     else if(flag_power_on == true && flag_shutdown == true)
     {
       sendMsg.data[0] = 0x00;
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
       
       //shutdown sequence
       while(sequence_cnt<SHUTDOWN_FRC)
@@ -407,9 +415,9 @@ void task_send(void *pvParameters)
     sendMsg.data[0] = digitalRead(LED_0) << 0
                     | digitalRead(LED_1) << 1;
 
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
     vTaskDelay(1);
 
     uint16_t voltage  = 0;
@@ -425,20 +433,21 @@ void task_send(void *pvParameters)
       
       int err = 0;
       err = checkSlave(SMBUS_MUX);
-
-      debug_print("mux  ");
-      debug_print(i);
-      debug_print(" ");
-      debug_println(err);
+      vTaskDelay(5);
+      // debug_print("mux  ");
+      // debug_print(i);
+      // debug_print(" ");
+      // debug_println(err);
       
       err = checkSlave(SMBUS_BATT);
-      debug_print("batt ");
-      debug_print(i);
-      debug_print(" ");
-      debug_println(err);
+      vTaskDelay(5);
+      // debug_print("batt ");
+      // debug_print(i);
+      // debug_print(" ");
+      // debug_println(err);
 
-      debug_print("reset ");
-      debug_println(reset_count);
+      // debug_print("reset ");
+      // debug_println(reset_count);
 
       voltage = readWord(SMBUS_VOLTAGE); //Voltage[mV]
       current = readWord(SMBUS_CULLENT); //Current[mA]
@@ -460,9 +469,9 @@ void task_send(void *pvParameters)
       battery_sn[i*2]   = (sn&0x00ff) >> 0;
       battery_sn[i*2+1] = (sn&0xff00) >> 8;
 
-      xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreSerialCanIO);
+      xSemaphoreGive(semaphoreCanIO);
       vTaskDelay(1);
       
     }
@@ -476,9 +485,9 @@ void task_send(void *pvParameters)
                     | digitalRead(G_12V_PC)     << 4
                     | digitalRead(G_24V)        << 5;
 
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
     vTaskDelay(1);
 
     sendMsg.can_id = ADDR_BAT_SN;
@@ -492,9 +501,9 @@ void task_send(void *pvParameters)
     sendMsg.data[6] = battery_sn[6];
     sendMsg.data[7] = battery_sn[7];
 
-    xSemaphoreTake(semaphoreSerialCanIO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreSerialCanIO);
+    xSemaphoreGive(semaphoreCanIO);
     
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -545,13 +554,15 @@ void setup()
   
   mcp2515.setFilterMask(MCP2515::MASK0, false, CAN_MASK);
   mcp2515.setFilter(MCP2515::RXF0, false, CAN_FILTER);
+  mcp2515.setFilterMask(MCP2515::MASK1, false, 0x07ff);  // filter only ID=0
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
 
   semaphoreSequence = xSemaphoreCreateBinary();
   semaphoreCanISR = xSemaphoreCreateBinary();
-  semaphoreSerialCanIO = xSemaphoreCreateMutex();
+  semaphoreSerialIO = xSemaphoreCreateMutex();
+  semaphoreCanIO = xSemaphoreCreateMutex();
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
@@ -561,9 +572,16 @@ void setup()
   vTaskStartScheduler(); 
 }
 
+int loop_count = 0;
+
 void loop()
 {
-  //debug_println("loop");
+  loop_count++;
+  if (loop_count > 1000) {
+    loop_count = 0;
+    debug_println("loop");
+  }
+
   if(digitalRead(SW_EW) == LOW && flag_emergency == false && flag_power_on == true)
   {
     task_emergency();
