@@ -129,9 +129,14 @@ void taskWifi(void *pvParameters)
   {
     for(int ch=1;ch<=13;ch++)
     {
-      WiFi.scanNetworks(true, false, false, 100, ch);
-      vTaskDelay(100);
+      // typical WiFi SSID beacon is 102.4 ms
+      WiFi.scanNetworks(true, false, false, 105, ch);
       int n = WiFi.scanComplete();
+      while (n < 0)
+      {
+        vTaskDelay(10);
+        n = WiFi.scanComplete();
+      }
       if(n>0)
       {
         for(int i=0;i<n;i++)
