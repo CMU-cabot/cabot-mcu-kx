@@ -8,8 +8,8 @@ daemon:
   port: "50051"
 directories:
   data: /opt/arduino
-  downloads: /root/.arduino15/staging
-  user: /root/Arduino
+  downloads: /opt/arduino/staging
+  user: /opt/arduino/Arduino
 library:
   enable_unsafe_install: false
 logging:
