@@ -38,6 +38,8 @@
 #define TIMEOUT                 10
 
 #define CHATA_THRESHOLD         3
+#define TOF_ZERO_REINIT_THRESHOLD 50
+#define TOF_RECOVERY_SKIP_CYCLES 10
 
 #define VIB_DUTY                127 //0~255
 
@@ -74,7 +76,7 @@ cap1203 cap_sens(&Wire);
 volatile SemaphoreHandle_t semaphoreCanISR;
 volatile SemaphoreHandle_t semaphoreSerialIO;
 volatile SemaphoreHandle_t semaphoreCanIO;
-volatile SemaphoreHandle_t semaphoreCap1203IO;
+volatile SemaphoreHandle_t semaphoreI2CIO;
 
 volatile unsigned char buff_vib[3];
 volatile unsigned char buff_tgt[4];
@@ -122,6 +124,21 @@ bool servo_enable = false;
 const uint8_t DXL_ID = 1;
 const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
+
+uint16_t tof_zero_count = 0;
+uint8_t tof_recovery_skip_count = 0;
+
+bool init_tof_sensor()
+{
+  for (int i = 0; i < 5; i++) {
+    if (lox.begin()) {
+      lox.startRangeContinuous(8);
+      return true;
+    }
+    delay(10);
+  }
+  return false;
+}
 
 void debug_println(char *str) {
   if (!DEBUG) return;
@@ -217,37 +234,37 @@ void process_message(struct can_frame recvMsg) {
   else if(recvMsg.can_id == ADDR_CAP_WR1)
   {
     buff_wr1[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     cap_sens.setCalibrationStatusReg(buff_wr1[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreGive(semaphoreI2CIO);
   }
   else if(recvMsg.can_id == ADDR_CAP_WR2)
   {
     buff_wr2[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreGive(semaphoreI2CIO);
   }
   else if(recvMsg.can_id == ADDR_CAP_WR3)
   {
     buff_wr3[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     cap_sens.setSensorInputEnableReg(buff_wr3[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreGive(semaphoreI2CIO);
   }
   else if(recvMsg.can_id == ADDR_CAP_WR4)
   {
     buff_wr4[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     cap_sens.setConfigurationReg(buff_wr4[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreGive(semaphoreI2CIO);
   }
   else if(recvMsg.can_id == ADDR_CAP_WR5)
   {
     buff_wr5[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     cap_sens.setConfiguration2Reg(buff_wr5[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreGive(semaphoreI2CIO);
   }
 }
 
@@ -399,16 +416,34 @@ void task20ms(void *pvParameters)
     }
     struct can_frame sendMsg;
     uint16_t tof;
+    bool skip_touch_read;
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     tof = lox.readRangeResult();
+    if (tof == 0) {
+      tof_zero_count++;
+      if (tof_zero_count >= TOF_ZERO_REINIT_THRESHOLD) {
+        if (init_tof_sensor()) {
+          tof_recovery_skip_count = TOF_RECOVERY_SKIP_CYCLES;
+        }
+        tof_zero_count = 0;
+      }
+    } else {
+      tof_zero_count = 0;
+    }
     sendMsg.can_id = ADDR_TOFCAP;
     sendMsg.can_dlc = 4;
     sendMsg.data[0] = (tof & 0x00ff) >> 0;
     sendMsg.data[1] = (tof & 0xff00) >> 8;
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
-    sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
-    cap_sens.setMainControlReg(false, false, false);
-    xSemaphoreGive(semaphoreCap1203IO);
+    skip_touch_read = tof_recovery_skip_count > 0;
+    if (skip_touch_read) {
+      sendMsg.data[2] = 0;
+      sendMsg.data[3] = 0;
+    } else {
+      sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
+      sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
+      cap_sens.setMainControlReg(false, false, false);
+    }
+    xSemaphoreGive(semaphoreI2CIO);
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
     xSemaphoreGive(semaphoreCanIO);
@@ -416,11 +451,20 @@ void task20ms(void *pvParameters)
 
     sendMsg.can_id = ADDR_CAP_STAT;
     sendMsg.can_dlc = 3;
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    sendMsg.data[0] = cap_sens.getGeneralStatusReg();
-    sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
-    sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
-    xSemaphoreGive(semaphoreCap1203IO);
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
+    if (skip_touch_read) {
+      sendMsg.data[0] = 0;
+      sendMsg.data[1] = 0;
+      sendMsg.data[2] = 0;
+    } else {
+      sendMsg.data[0] = cap_sens.getGeneralStatusReg();
+      sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
+      sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
+    }
+    if (skip_touch_read) {
+      tof_recovery_skip_count--;
+    }
+    xSemaphoreGive(semaphoreI2CIO);
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
     xSemaphoreGive(semaphoreCanIO);
@@ -516,11 +560,10 @@ void setup()
   
   servo_angle = 2047;
 
-  while(!lox.begin())
+  while(!init_tof_sensor())
   {
     delay(10);
   }
-  lox.startRangeContinuous(8);
 
   dxl.setPortProtocolVersion(DXL_PROTOCOL_VERSION);
   if(dxl.ping(DXL_ID) == true)
@@ -550,7 +593,7 @@ void setup()
   semaphoreCanISR = xSemaphoreCreateBinary();
   semaphoreSerialIO = xSemaphoreCreateMutex();
   semaphoreCanIO = xSemaphoreCreateMutex();
-  semaphoreCap1203IO = xSemaphoreCreateMutex();
+  semaphoreI2CIO = xSemaphoreCreateMutex();
 
   debug_println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
