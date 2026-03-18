@@ -57,6 +57,7 @@
 #define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3 (setSensorInputEnableReg)
 #define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
 #define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
+#define ADDR_FW_INFO    0x487       // 0b1 001 0000 111  Firmware marker for flash verification
 
 #define CAN_FILTER0     0x0090      // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
 #define CAN_FILTER1     0x0480      // 0b1 001 0000 000 filter for ADDR_CAP_WR*
@@ -127,6 +128,22 @@ using namespace ControlTableItem;
 
 uint16_t tof_zero_count = 0;
 uint8_t tof_recovery_skip_count = 0;
+uint8_t fw_info_announce_count = 10;
+uint8_t fw_info_cycle_count = 0;
+
+void send_fw_info()
+{
+  struct can_frame sendMsg;
+  sendMsg.can_id = ADDR_FW_INFO;
+  sendMsg.can_dlc = 4;
+  sendMsg.data[0] = 'K';
+  sendMsg.data[1] = 'X';
+  sendMsg.data[2] = 0x01;
+  sendMsg.data[3] = 0x00;
+  xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+  mcp2515.sendMessage(&sendMsg);
+  xSemaphoreGive(semaphoreCanIO);
+}
 
 bool init_tof_sensor()
 {
@@ -469,6 +486,15 @@ void task20ms(void *pvParameters)
     mcp2515.sendMessage(&sendMsg);
     xSemaphoreGive(semaphoreCanIO);
     delayMicroseconds(500);
+
+    if (fw_info_announce_count > 0) {
+      fw_info_cycle_count++;
+      if (fw_info_cycle_count >= 50) {
+        send_fw_info();
+        fw_info_cycle_count = 0;
+        fw_info_announce_count--;
+      }
+    }
     
     data_tact[0] = sw_right << 0
                  | sw_left  << 1
@@ -532,6 +558,7 @@ void setup()
   Serial.setRx(PA10);
   Serial.setTx(PA9);
   Serial.begin(115200);
+  Serial.println("FW:KX-HANDLE-TOF-REINIT-1");
   dxl.begin(115200);
 
   pinMode(SW_RIGHT, INPUT);
@@ -596,6 +623,7 @@ void setup()
   semaphoreI2CIO = xSemaphoreCreateMutex();
 
   debug_println("CAN OK");
+  send_fw_info();
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
 
   xTaskCreate(task2ms,  "task2ms",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
