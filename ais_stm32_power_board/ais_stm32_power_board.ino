@@ -37,7 +37,10 @@
 
 #define SMBUS_VOLTAGE 0x09    // SMBUS battery voltage address
 #define SMBUS_CULLENT 0x0a    // SMBUS battery current address
-#define SMBUS_CHARGE  0x0d    // SMBUS battery remaining capacity address
+#define SMBUS_CHARGE  0x0d    // SMBUS battery relative state of charge address
+#define SMBUS_REMAIN  0x0f    // SMBUS battery remaining capacity address
+#define SMBUS_FULL    0x10    // SMBUS battery full charge capacity address
+#define SMBUS_DESIGN  0x18    // SMBUS battery design capacity address
 #define SMBUS_TEMP    0x08    // SMBUS battery temperature address
 #define SMBUS_SERIAL  0x1c    // SMBUS battery serial No. address
 
@@ -53,11 +56,17 @@
 #define ADDR_D455_3   0x10c   // 0b0 010 0001 100  +12V_D455_3 control
 #define ADDR_MCU      0x10d   // 0b0 010 0001 101  +5V_MCU control
 #define ADDR_PWM      0x10e   // 0b0 010 0001 110  FAN pwm control
+#define ADDR_SMBUS_REQ 0x10f  // 0b0 010 0001 111  SMBus read request
 #define ADDR_BAT_1    0x518   // 0b1 010 0011 000  Battery1 status
 #define ADDR_BAT_2    0x519   // 0b1 010 0011 001  Battery2 status
 #define ADDR_BAT_3    0x51a   // 0b1 010 0011 010  Battery3 status
 #define ADDR_BAT_4    0x51b   // 0b1 010 0011 011  Battery4 status
+#define ADDR_BAT_CAP_1 0x51c  // 0b1 010 0011 100  Battery1 charge/capacity
+#define ADDR_BAT_CAP_2 0x51d  // 0b1 010 0011 101  Battery2 charge/capacity
+#define ADDR_BAT_CAP_3 0x51e  // 0b1 010 0011 110  Battery3 charge/capacity
+#define ADDR_BAT_CAP_4 0x51f  // 0b1 010 0011 111  Battery4 charge/capacity
 #define ADDR_BAT_SN   0x520   // 0b1 010 0100 000  Battery serial No.
+#define ADDR_SMBUS_RES 0x521  // 0b1 010 0100 001  SMBus read response
 #define CAN_FILTER    0x0108  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
 #define CAN_MASK      0x07f8  // 0b1 111 1111 000 mask by priority, major, minor
 #define SHUTDOWN_PC   60000   // pc shutdown wait time[ms](Not used)
@@ -73,6 +82,7 @@ volatile SemaphoreHandle_t semaphoreSequence;
 volatile SemaphoreHandle_t semaphoreCanISR;
 volatile SemaphoreHandle_t semaphoreSerialIO;
 volatile SemaphoreHandle_t semaphoreCanIO;
+volatile SemaphoreHandle_t semaphoreSMBusIO;
 
 volatile bool flag_power_on   = false;
 volatile bool flag_shutdown   = false;
@@ -95,6 +105,35 @@ int32_t sequence_cnt  = 0;
 
 //debug
 int reset_count = 0;
+
+bool isSupportedSMBusWordRead(uint8_t addr)
+{
+  switch(addr) {
+    case 0x01:  // RemainingCapacityAlarm
+    case 0x02:  // RemainingTimeAlarm
+    case 0x03:  // BatteryMode
+    case 0x04:  // AtRate
+    case 0x05:  // AtRateTimeToFull
+    case 0x06:  // AtRateTimeToEmpty
+    case 0x07:  // AtRateOK
+    case 0x0b:  // AverageCurrent
+    case 0x0c:  // MaxError
+    case 0x0e:  // AbsoluteStateOfCharge
+    case 0x11:  // RunTimeToEmpty
+    case 0x12:  // AverageTimeToEmpty
+    case 0x13:  // AverageTimeToFull
+    case 0x14:  // ChargingCurrent
+    case 0x15:  // ChargingVoltage
+    case 0x16:  // BatteryStatus
+    case 0x17:  // CycleCount
+    case 0x19:  // DesignVoltage
+    case 0x1a:  // SpecificationInfo
+    case 0x1b:  // ManufactureDate
+      return true;
+    default:
+      return false;
+  }
+}
 
 void debug_print(char *str) {
   if (!DEBUG) return;
@@ -296,6 +335,34 @@ void process_message(struct can_frame recvMsg) {
     buff_pwm[0] = recvMsg.data[0];
     analogWrite(PWM_FAN, 255 - buff_pwm[0]);
   }
+  else if(recvMsg.can_id == ADDR_SMBUS_REQ && recvMsg.can_dlc == 2)
+  {
+    uint8_t port = recvMsg.data[0];
+    uint8_t addr = recvMsg.data[1];
+    uint16_t value = 0xFFFF;
+    struct can_frame sendMsg;
+
+    if (1 <= port && port <= 4 && isSupportedSMBusWordRead(addr))
+    {
+      xSemaphoreTake(semaphoreSMBusIO, portMAX_DELAY);
+      setChannel(port - 1);
+      checkSlave(SMBUS_MUX);
+      checkSlave(SMBUS_BATT);
+      value = readWord(addr);
+      xSemaphoreGive(semaphoreSMBusIO);
+    }
+
+    sendMsg.can_id = ADDR_SMBUS_RES;
+    sendMsg.can_dlc = 4;
+    sendMsg.data[0] = port;
+    sendMsg.data[1] = addr;
+    sendMsg.data[2] = (value&0x00ff) >> 0;
+    sendMsg.data[3] = (value&0xff00) >> 8;
+
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    mcp2515.sendMessage(&sendMsg);
+    xSemaphoreGive(semaphoreCanIO);
+  }
 }
 
 void task_emergency()
@@ -444,12 +511,16 @@ void task_send(void *pvParameters)
     uint16_t voltage  = 0;
     int16_t current  = 0;
     uint16_t charge   = 0;
+    uint16_t remain   = 0;
+    uint16_t capacity = 0;
+    uint16_t design   = 0;
     uint16_t temp     = 0;
     uint16_t sn       = 0;
     byte battery_sn[8]= {0};
     
     for(int i=0;i<4;i++)
     {
+      xSemaphoreTake(semaphoreSMBusIO, portMAX_DELAY);
       setChannel(i);
       
       int err = 0;
@@ -473,8 +544,12 @@ void task_send(void *pvParameters)
       voltage = readWord(SMBUS_VOLTAGE); //Voltage[mV]
       current = readWordSigned(SMBUS_CULLENT); //Current[mA]
       charge  = readWord(SMBUS_CHARGE);  //RelativeStateOfCharge[%]
+      remain  = readWord(SMBUS_REMAIN);  //RemainingCapacity[mAh]
+      capacity = readWord(SMBUS_FULL);   //FullChargeCapacity[mAh]
+      design  = readWord(SMBUS_DESIGN);  //DesignCapacity[mAh]
       temp    = readWord(SMBUS_TEMP);    //Temperature[0.1k]
       sn      = readWord(SMBUS_SERIAL);  //SerialNumber
+      xSemaphoreGive(semaphoreSMBusIO);
 
       sendMsg.can_id = ADDR_BAT_1+i;
       sendMsg.can_dlc = 8;
@@ -494,7 +569,21 @@ void task_send(void *pvParameters)
       mcp2515.sendMessage(&sendMsg);
       xSemaphoreGive(semaphoreCanIO);
       vTaskDelay(1);
-      
+
+      sendMsg.can_id = ADDR_BAT_CAP_1+i;
+      sendMsg.can_dlc = 6;
+      sendMsg.data[0] = (remain&0x00ff)   >> 0;
+      sendMsg.data[1] = (remain&0xff00)   >> 8;
+      sendMsg.data[2] = (capacity&0x00ff) >> 0;
+      sendMsg.data[3] = (capacity&0xff00) >> 8;
+      sendMsg.data[4] = (design&0x00ff)   >> 0;
+      sendMsg.data[5] = (design&0xff00)   >> 8;
+
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      mcp2515.sendMessage(&sendMsg);
+      xSemaphoreGive(semaphoreCanIO);
+      vTaskDelay(1);
+
     }
 
     sendMsg.can_id = ADDR_STAT;
@@ -584,6 +673,7 @@ void setup()
   semaphoreCanISR = xSemaphoreCreateBinary();
   semaphoreSerialIO = xSemaphoreCreateMutex();
   semaphoreCanIO = xSemaphoreCreateMutex();
+  semaphoreSMBusIO = xSemaphoreCreateMutex();
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
