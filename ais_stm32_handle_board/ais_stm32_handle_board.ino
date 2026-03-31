@@ -147,12 +147,21 @@ void log_tof_event(uint8_t event_code)
 
 bool init_tof_sensor()
 {
+  if (semaphoreI2CIO != NULL) {
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
+  }
   for (int i = 0; i < 5; i++) {
     if (lox.begin()) {
       lox.startRangeContinuous(8);
+      if (semaphoreI2CIO != NULL) {
+        xSemaphoreGive(semaphoreI2CIO);
+      }
       return true;
     }
     delay(10);
+  }
+  if (semaphoreI2CIO != NULL) {
+    xSemaphoreGive(semaphoreI2CIO);
   }
   return false;
 }
@@ -434,17 +443,19 @@ void task20ms(void *pvParameters)
     struct can_frame sendMsg;
     uint16_t tof;
     bool skip_touch_read;
+    uint8_t tof_event_code = 0;
     xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
     tof = lox.readRangeResult();
+    xSemaphoreGive(semaphoreI2CIO);
     if (tof == 0) {
       tof_zero_count++;
       if (tof_zero_count >= TOF_ZERO_REINIT_THRESHOLD) {
         if (init_tof_sensor()) {
           tof_reinit_count++;
           tof_recovery_skip_count = TOF_RECOVERY_SKIP_CYCLES;
-          log_tof_event(0x01);
+          tof_event_code = 0x01;
         } else {
-          log_tof_event(0x02);
+          tof_event_code = 0x02;
         }
         tof_zero_count = 0;
       }
@@ -456,11 +467,13 @@ void task20ms(void *pvParameters)
     sendMsg.data[0] = (tof & 0x00ff) >> 0;
     sendMsg.data[1] = (tof & 0xff00) >> 8;
     skip_touch_read = tof_recovery_skip_count > 0;
+    // Keep touch_raw, but force touch status invalid while ToF is recovering.
+    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
+    // Keep touch_raw during ToF recovery so sensor behavior can still be inspected in logs.
+    sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
     if (skip_touch_read) {
-      sendMsg.data[2] = 0;
       sendMsg.data[3] = 0;
     } else {
-      sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
       sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
       cap_sens.setMainControlReg(false, false, false);
     }
@@ -468,24 +481,28 @@ void task20ms(void *pvParameters)
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
     xSemaphoreGive(semaphoreCanIO);
+    if (tof_event_code != 0) {
+      log_tof_event(tof_event_code);
+    }
     delayMicroseconds(500);
 
     sendMsg.can_id = ADDR_CAP_STAT;
     sendMsg.can_dlc = 3;
-    xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
+    // Keep CAP debug status invalid during the same recovery window.
     if (skip_touch_read) {
       sendMsg.data[0] = 0;
       sendMsg.data[1] = 0;
       sendMsg.data[2] = 0;
     } else {
+      xSemaphoreTake(semaphoreI2CIO, portMAX_DELAY);
       sendMsg.data[0] = cap_sens.getGeneralStatusReg();
       sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
       sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
+      xSemaphoreGive(semaphoreI2CIO);
     }
     if (skip_touch_read) {
       tof_recovery_skip_count--;
     }
-    xSemaphoreGive(semaphoreI2CIO);
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     mcp2515.sendMessage(&sendMsg);
     xSemaphoreGive(semaphoreCanIO);
@@ -555,6 +572,11 @@ void setup()
   Serial.begin(115200);
   dxl.begin(115200);
 
+  semaphoreCanISR = xSemaphoreCreateBinary();
+  semaphoreSerialIO = xSemaphoreCreateMutex();
+  semaphoreCanIO = xSemaphoreCreateMutex();
+  semaphoreI2CIO = xSemaphoreCreateMutex();
+
   pinMode(SW_RIGHT, INPUT);
   pinMode(SW_LEFT, INPUT);
   pinMode(SW_UP, INPUT);
@@ -610,11 +632,6 @@ void setup()
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);
-
-  semaphoreCanISR = xSemaphoreCreateBinary();
-  semaphoreSerialIO = xSemaphoreCreateMutex();
-  semaphoreCanIO = xSemaphoreCreateMutex();
-  semaphoreI2CIO = xSemaphoreCreateMutex();
 
   debug_println("CAN OK");
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR, FALLING);
