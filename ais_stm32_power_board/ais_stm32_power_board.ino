@@ -83,6 +83,14 @@ volatile SemaphoreHandle_t semaphoreCanISR;
 volatile SemaphoreHandle_t semaphoreSerialIO;
 volatile SemaphoreHandle_t semaphoreCanIO;
 volatile SemaphoreHandle_t semaphoreSMBusIO;
+volatile QueueHandle_t queueSMBusRequest;
+
+#define SMBUS_READ_QUEUE_LENGTH 8
+
+typedef struct {
+  uint8_t port;
+  uint8_t addr;
+} SMBusReadRequest;
 
 volatile bool flag_power_on   = false;
 volatile bool flag_shutdown   = false;
@@ -249,6 +257,21 @@ void mcpISR() {
 
 int task_read_count = 0;
 
+void sendSMBusReadResponse(uint8_t port, uint8_t addr, uint16_t value)
+{
+  struct can_frame sendMsg;
+  sendMsg.can_id = ADDR_SMBUS_RES;
+  sendMsg.can_dlc = 4;
+  sendMsg.data[0] = port;
+  sendMsg.data[1] = addr;
+  sendMsg.data[2] = (value&0x00ff) >> 0;
+  sendMsg.data[3] = (value&0xff00) >> 8;
+
+  xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+  mcp2515.sendMessage(&sendMsg);
+  xSemaphoreGive(semaphoreCanIO);
+}
+
 void task_read(void *pvParameters) {
   while(1) {
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
@@ -284,6 +307,30 @@ void task_read(void *pvParameters) {
     }
     // wait for a tick, just in case the interrupt is not fired somehow
     xSemaphoreTake(semaphoreCanISR, 1);
+  }
+}
+
+void task_smbus_response(void *pvParameters)
+{
+  SMBusReadRequest request;
+  while(1)
+  {
+    if (xQueueReceive(queueSMBusRequest, &request, portMAX_DELAY) != pdTRUE) {
+      continue;
+    }
+
+    uint16_t value = 0xFFFF;
+    if (1 <= request.port && request.port <= 4 && isSupportedSMBusWordRead(request.addr))
+    {
+      xSemaphoreTake(semaphoreSMBusIO, portMAX_DELAY);
+      setChannel(request.port - 1);
+      checkSlave(SMBUS_MUX);
+      checkSlave(SMBUS_BATT);
+      value = readWord(request.addr);
+      xSemaphoreGive(semaphoreSMBusIO);
+    }
+
+    sendSMBusReadResponse(request.port, request.addr, value);
   }
 }
 
@@ -337,31 +384,14 @@ void process_message(struct can_frame recvMsg) {
   }
   else if(recvMsg.can_id == ADDR_SMBUS_REQ && recvMsg.can_dlc == 2)
   {
-    uint8_t port = recvMsg.data[0];
-    uint8_t addr = recvMsg.data[1];
-    uint16_t value = 0xFFFF;
-    struct can_frame sendMsg;
-
-    if (1 <= port && port <= 4 && isSupportedSMBusWordRead(addr))
+    SMBusReadRequest request;
+    request.port = recvMsg.data[0];
+    request.addr = recvMsg.data[1];
+    if (xQueueSend(queueSMBusRequest, &request, 0) != pdTRUE)
     {
-      xSemaphoreTake(semaphoreSMBusIO, portMAX_DELAY);
-      setChannel(port - 1);
-      checkSlave(SMBUS_MUX);
-      checkSlave(SMBUS_BATT);
-      value = readWord(addr);
-      xSemaphoreGive(semaphoreSMBusIO);
+      debug_println("smbus queue full");
+      sendSMBusReadResponse(request.port, request.addr, 0xFFFF);
     }
-
-    sendMsg.can_id = ADDR_SMBUS_RES;
-    sendMsg.can_dlc = 4;
-    sendMsg.data[0] = port;
-    sendMsg.data[1] = addr;
-    sendMsg.data[2] = (value&0x00ff) >> 0;
-    sendMsg.data[3] = (value&0xff00) >> 8;
-
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
   }
 }
 
@@ -674,9 +704,11 @@ void setup()
   semaphoreSerialIO = xSemaphoreCreateMutex();
   semaphoreCanIO = xSemaphoreCreateMutex();
   semaphoreSMBusIO = xSemaphoreCreateMutex();
+  queueSMBusRequest = xQueueCreate(SMBUS_READ_QUEUE_LENGTH, sizeof(SMBusReadRequest));
 
   xTaskCreate(task_sequence,  "task_sequence",  configMINIMAL_STACK_SIZE, NULL, 5,  NULL);
   xTaskCreate(task_send,      "task_send",      configMINIMAL_STACK_SIZE, NULL, 9,  NULL);
+  xTaskCreate(task_smbus_response, "task_smbus_response", configMINIMAL_STACK_SIZE, NULL, 9, NULL);
   xTaskCreate(task_read,      "task_read",      configMINIMAL_STACK_SIZE, NULL, 10, NULL);
 
   attachInterrupt(digitalPinToInterrupt(SPI_INT), &mcpISR,       FALLING);
