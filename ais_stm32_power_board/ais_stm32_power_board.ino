@@ -67,6 +67,7 @@
 #define ADDR_BAT_CAP_4 0x51f  // 0b1 010 0011 111  Battery4 charge/capacity
 #define ADDR_BAT_SN   0x520   // 0b1 010 0100 000  Battery serial No.
 #define ADDR_SMBUS_RES 0x521  // 0b1 010 0100 001  SMBus read response
+#define ADDR_SMBUS_ACK 0x522  // 0b1 010 0100 010  SMBus read request ack
 #define CAN_FILTER    0x0108  // 0b0 010 0001 000 filter for ADDR_ODRIVE ~ ADDR_PWM (major=2, minor=1)
 #define CAN_MASK      0x07f8  // 0b1 111 1111 000 mask by priority, major, minor
 #define SHUTDOWN_PC   60000   // pc shutdown wait time[ms](Not used)
@@ -272,6 +273,19 @@ void sendSMBusReadResponse(uint8_t port, uint8_t addr, uint16_t value)
   xSemaphoreGive(semaphoreCanIO);
 }
 
+void sendSMBusReadAck(uint8_t port, uint8_t addr)
+{
+  struct can_frame sendMsg;
+  sendMsg.can_id = ADDR_SMBUS_ACK;
+  sendMsg.can_dlc = 2;
+  sendMsg.data[0] = port;
+  sendMsg.data[1] = addr;
+
+  xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+  mcp2515.sendMessage(&sendMsg);
+  xSemaphoreGive(semaphoreCanIO);
+}
+
 void task_read(void *pvParameters) {
   while(1) {
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
@@ -387,6 +401,7 @@ void process_message(struct can_frame recvMsg) {
     SMBusReadRequest request;
     request.port = recvMsg.data[0];
     request.addr = recvMsg.data[1];
+    sendSMBusReadAck(request.port, request.addr);
     if (xQueueSend(queueSMBusRequest, &request, 0) != pdTRUE)
     {
       debug_println("smbus queue full");
