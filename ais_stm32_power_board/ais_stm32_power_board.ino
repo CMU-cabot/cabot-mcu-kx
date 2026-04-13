@@ -322,12 +322,8 @@ void task_smbus_response(void *pvParameters)
     uint16_t value = 0xFFFF;
     if (1 <= request.port && request.port <= 4 && isSupportedSMBusWordRead(request.addr))
     {
-      xSemaphoreTake(semaphoreSMBusIO, portMAX_DELAY);
-      setChannel(request.port - 1);
-      checkSlave(SMBUS_MUX);
-      checkSlave(SMBUS_BATT);
-      value = readWord(request.addr);
-      xSemaphoreGive(semaphoreSMBusIO);
+      // Temporary debug path: bypass SMBus/I2C and echo the request in the value.
+      value = ((uint16_t)request.port << 8) | request.addr;
     }
 
     sendSMBusReadResponse(request.port, request.addr, value);
