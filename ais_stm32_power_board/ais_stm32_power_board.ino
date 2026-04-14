@@ -274,31 +274,34 @@ void sendSMBusReadResponse(uint8_t port, uint8_t addr, uint16_t value)
 
 void task_read(void *pvParameters) {
   while(1) {
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    uint8_t irq = mcp2515.getInterrupts();
-    // ensure that the interrupt is cleared and will get next mcpISR call
-    mcp2515.clearInterrupts();
-    xSemaphoreGive(semaphoreCanIO);
+    while(1) {
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      uint8_t irq = mcp2515.getInterrupts();
+      xSemaphoreGive(semaphoreCanIO);
 
-    struct can_frame recvMsg;
-    // read from RXB0 and RXB1 if any available data
-    // then wait for the next interrupt
-    if (irq & MCP2515::CANINTF_RX0IF) {
-      debug_println("task_read0");
-      // frame contains received from RXB0 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
-      xSemaphoreGive(semaphoreCanIO);
-      process_message(recvMsg);
+      // read from RXB0 and RXB1 until both buffers are empty.
+      // readMessage() clears the corresponding RX flag for each buffer.
+      if ((irq & (MCP2515::CANINTF_RX0IF | MCP2515::CANINTF_RX1IF)) == 0) {
+        break;
+      }
+
+      struct can_frame recvMsg;
+      if (irq & MCP2515::CANINTF_RX0IF) {
+        debug_println("task_read0");
+        xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+        mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
+        xSemaphoreGive(semaphoreCanIO);
+        process_message(recvMsg);
+      }
+      if (irq & MCP2515::CANINTF_RX1IF) {
+        debug_println("task_read1");
+        xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+        mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
+        xSemaphoreGive(semaphoreCanIO);
+        process_message(recvMsg);
+      }
     }
-    if (irq & MCP2515::CANINTF_RX1IF) {
-      debug_println("task_read1");
-      // frame contains received from RXB1 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
-      xSemaphoreGive(semaphoreCanIO);
-      process_message(recvMsg);
-    }
+
     task_read_count++;
     if (task_read_count > 1000)
     {
