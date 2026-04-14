@@ -9,6 +9,7 @@ services:
     environment:
       - ARDUINO_BOARD
       - ARDUINO_PORT
+      - ARDUINO_CLI_CONFIG_FILE=/opt/arduino/arduino-cli.yaml
     volumes:
       - ./ais_esp32_sensor_board:/mnt/ais_esp32_sensor_board
       - /dev:/dev
@@ -28,6 +29,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.stm32
+    user: "${UID}:${GID}"
     environment:
       - ARDUINO_BOARD
       - ARDUINO_PORT

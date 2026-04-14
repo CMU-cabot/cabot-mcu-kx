@@ -54,8 +54,8 @@ fi
 
 function build() {
     echo "building..."
-    echo "arduino-cli compile -b $board $debug ."
-    arduino-cli compile -b $board $debug .
+    echo "arduino-cli compile -b $board $debug --export-binaries ."
+    arduino-cli compile -b $board $debug --export-binaries .
 
     if [ $? -ne 0 ]; then
 	err "Please check board ($board)"

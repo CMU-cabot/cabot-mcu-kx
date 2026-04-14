@@ -1,6 +1,8 @@
 FROM jpconstantineau/arduino-cli:0.33.0
 
 RUN arduino-cli config init
+RUN mkdir -p /opt/arduino/Arduino /opt/arduino/staging \
+    && chmod -R a+rwx /opt/arduino/Arduino /opt/arduino/staging
 COPY arduino-cli-stm32.yaml /opt/arduino/arduino-cli.yaml
 RUN arduino-cli core update-index
 RUN arduino-cli core install STMicroelectronics:stm32@2.7.1
