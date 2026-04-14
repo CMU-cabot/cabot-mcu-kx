@@ -21,7 +21,7 @@ function help() {
     echo "-d         debug mode (Seria.print)"
 }
 
-: ${ARDUINO_BOARD:="STMicroelectronics:stm32:GenF3"}
+: ${ARDUINO_BOARD:="STMicroelectronics:stm32:GenF3:pnum=GENERIC_F303K8TX"}
 : ${ARDUINO_PORT:=""}
 
 board=$ARDUINO_BOARD
@@ -54,8 +54,8 @@ fi
 
 function build() {
     echo "building..."
-    echo "arduino-cli compile -b $board $debug ."
-    arduino-cli compile -b $board $debug .
+    echo "arduino-cli compile -b $board $debug --export-binaries ."
+    arduino-cli compile -b $board $debug --export-binaries .
 
     if [ $? -ne 0 ]; then
 	err "Please check board ($board)"
