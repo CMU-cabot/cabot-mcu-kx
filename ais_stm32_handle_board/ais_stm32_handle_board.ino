@@ -55,6 +55,11 @@
 #define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3 (setSensorInputEnableReg)
 #define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
 #define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
+#define ADDR_BOOT_CTRL  0x7a0       // CAN bootloader control request
+#define ADDR_BOOT_RESP  0x7a1       // CAN bootloader/application response
+
+#define BOOT_ENTER      0x01
+#define BOOT_MAGIC      0x314c4243UL // "CBL1" in little-endian byte order
 
 #define CAN_FILTER0     0x0090      // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
 #define CAN_FILTER1     0x0480      // 0b1 001 0000 000 filter for ADDR_CAP_WR*
@@ -184,7 +189,32 @@ void task_read(void *pvParameters) {
 }
 
 void process_message(struct can_frame recvMsg) {
-  if(recvMsg.can_id == ADDR_VIB)
+  if(recvMsg.can_id == ADDR_BOOT_CTRL &&
+     recvMsg.can_dlc == 8 &&
+     recvMsg.data[0] == BOOT_ENTER &&
+     recvMsg.data[1] == 'C' && recvMsg.data[2] == 'B' &&
+     recvMsg.data[3] == 'L' && recvMsg.data[4] == '1')
+  {
+    struct can_frame response = {};
+    response.can_id = ADDR_BOOT_RESP;
+    response.can_dlc = 8;
+    response.data[0] = BOOT_ENTER | 0x80;
+    response.data[1] = 0;
+    response.data[2] = 0xff;
+    response.data[3] = 0;
+    response.data[6] = 1;
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    mcp2515.sendMessage(&response);
+    xSemaphoreGive(semaphoreCanIO);
+    delay(2);
+
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+    RTC->BKP0R = BOOT_MAGIC;
+    __DSB();
+    NVIC_SystemReset();
+  }
+  else if(recvMsg.can_id == ADDR_VIB)
   {
     buff_vib[0] = recvMsg.data[0];
     buff_vib[1] = recvMsg.data[1];
@@ -543,6 +573,7 @@ void setup()
 
   mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
   mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER1);
+  mcp2515.setFilter(MCP2515::RXF3, false, ADDR_BOOT_CTRL);
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);

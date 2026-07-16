@@ -1,0 +1,44 @@
+#ifndef HANDLE_BOOTLOADER_PROTOCOL_H
+#define HANDLE_BOOTLOADER_PROTOCOL_H
+
+#include <stdint.h>
+
+#define BOOT_PROTOCOL_VERSION 1U
+#define BOOT_VERSION 1U
+
+#define CAN_ID_CONTROL 0x7A0U
+#define CAN_ID_RESPONSE 0x7A1U
+#define CAN_ID_DATA 0x7A2U
+
+#define OP_ENTER 0x01U
+#define OP_BEGIN_INFO 0x02U
+#define OP_BEGIN_CRC 0x03U
+#define OP_QUERY 0x04U
+#define OP_PAGE_BEGIN 0x10U
+#define OP_PAGE_COMMIT 0x11U
+#define OP_DATA 0x12U
+#define OP_FINISH 0x20U
+#define OP_ABORT 0x21U
+
+enum boot_status {
+  STATUS_OK = 0,
+  STATUS_BAD_STATE = 1,
+  STATUS_BAD_ARGUMENT = 2,
+  STATUS_OFFSET = 3,
+  STATUS_PAGE_CRC = 4,
+  STATUS_FLASH = 5,
+  STATUS_IMAGE_CRC = 6,
+  STATUS_BAD_VECTOR = 7,
+  STATUS_TIMEOUT = 8,
+  STATUS_UNSUPPORTED = 9,
+};
+
+enum boot_state {
+  STATE_WAIT = 0,
+  STATE_UPDATE = 1,
+  STATE_PAGE = 2,
+  STATE_READY = 3,
+  STATE_VALID_APP = 4,
+};
+
+#endif
