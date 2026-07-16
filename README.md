@@ -59,3 +59,23 @@ or
 
 ./build.sh all
 ```
+
+### STM32 handle CAN bootloader
+
+The handle firmware includes a classic-CAN bootloader and a SocketCAN update tool.
+Its STM32F303K8 flash layout is:
+
+- CAN bootloader: `0x08000000` - `0x08001FFF` (8 KiB)
+- Handle application: `0x08002000` - `0x0800F7FF` (54 KiB)
+- Committed-image metadata: `0x0800F800` - `0x0800FFFF` (2 KiB)
+
+From the `stm32-handle` container, `./build.sh firmware` builds and checks both
+images. Use the generated application binary for a CAN update:
+
+```sh
+python3 tools/can_update.py -i can0 \
+  build/can-application/ais_stm32_handle_board.ino.bin
+```
+
+See [ais_stm32_handle_board/BOOTLOADER.md](ais_stm32_handle_board/BOOTLOADER.md) for
+the memory contract, CAN protocol, build outputs, and test procedure.
