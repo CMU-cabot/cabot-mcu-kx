@@ -11,6 +11,7 @@ OP_ENTER = 0x01
 OP_BEGIN_INFO = 0x02
 OP_BEGIN_CRC = 0x03
 OP_QUERY = 0x04
+OP_APP_VERSION = 0x05
 OP_PAGE_BEGIN = 0x10
 OP_PAGE_COMMIT = 0x11
 OP_DATA = 0x12
@@ -103,3 +104,7 @@ def make_response(operation: int, status: int, page: int, state: int,
         expected_offset,
         detail,
     )
+
+
+def format_app_version(version: int) -> str:
+    return f"{(version >> 8) & 0xFF}.{version & 0xFF}"

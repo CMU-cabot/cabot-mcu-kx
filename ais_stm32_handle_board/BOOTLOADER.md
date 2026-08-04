@@ -45,11 +45,13 @@ application build uses `build.flash_offset=0x2000`, `VECT_TAB_OFFSET=0x2000`, `-
 and LTO. `./build.sh -s` remains available for the legacy standalone application and
 is not a CAN update payload.
 
-Validate or install an application with the standard-library-only SocketCAN tool:
+Validate, query the running application version, or install an application with the
+standard-library-only SocketCAN tool:
 
 ```sh
 python3 tools/can_update.py --dry-run \
   build/can-application/ais_stm32_handle_board.ino.bin
+python3 tools/can_update.py --interface can0 --query-app-version
 python3 tools/can_update.py --interface can0 \
   build/can-application/ais_stm32_handle_board.ino.bin
 ```
@@ -79,16 +81,17 @@ All frames are standard 11-bit, DLC 8 frames at 1 Mbps:
 | `0x7A1` | handle to host | ACK, NACK, state, and expected offset |
 | `0x7A2` | host to handle | page data: 16-bit offset plus 6 bytes |
 
-Control opcodes are `ENTER`, `QUERY`, `BEGIN_INFO`, `BEGIN_CRC`, `PAGE_BEGIN`,
-`PAGE_COMMIT`, `FINISH`, and `ABORT`. The host sends data in windows of 16 frames and
-uses `QUERY` to obtain the next expected offset. Lost or out-of-order frames resume at
-that offset. Control commands that can lose their ACK are idempotent.
+Control opcodes are `ENTER`, `QUERY`, `APP_VERSION`, `BEGIN_INFO`, `BEGIN_CRC`,
+`PAGE_BEGIN`, `PAGE_COMMIT`, `FINISH`, and `ABORT`. The host sends data in windows of
+16 frames and uses `QUERY` to obtain the next expected offset. Lost or out-of-order
+frames resume at that offset. Control commands that can lose their ACK are idempotent.
 
 Multi-byte integers are little-endian. The eight control bytes are:
 
 | Opcode | Bytes 1-7 |
 | --- | --- |
 | `0x01 ENTER` | ASCII `CBL1`, then three zero bytes |
+| `0x05 APP_VERSION` | seven zero bytes |
 | `0x02 BEGIN_INFO` | protocol version, 32-bit image length, two zero bytes |
 | `0x03 BEGIN_CRC` | 32-bit image CRC, then three zero bytes |
 | `0x04 QUERY` | seven zero bytes |
@@ -100,6 +103,10 @@ A response contains opcode ORed with `0x80`, status, page, state, 16-bit expecte
 offset, and 16-bit detail. Status zero is success; the remaining values are defined in
 `bootloader/protocol.h`. A data frame contains a 16-bit page offset followed by six
 bytes, with unused bytes in the final frame set to zero.
+
+The running application answers `APP_VERSION` on `0x7A1` with status `OK`, state
+`VALID_APP`, and a packed `major.minor` version in the 16-bit detail field
+(`detail = major << 8 | minor`). The bootloader itself does not implement this opcode.
 
 One 2 KiB page is buffered in SRAM. The bootloader validates its CRC before erasing
 and programming the corresponding application page, then verifies flash by reading it

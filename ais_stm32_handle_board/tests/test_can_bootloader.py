@@ -12,15 +12,20 @@ sys.path.insert(0, str(HANDLE_DIR))
 from tools.can_bootloader_protocol import (  # noqa: E402
     APP_ADDRESS,
     APP_MAX_SIZE,
+    CAN_ID_CONTROL,
     CAN_ID_DATA,
     CAN_ID_RESPONSE,
     OP_ABORT,
+    OP_APP_VERSION,
     OP_BEGIN_CRC,
     OP_FINISH,
     OP_PAGE_BEGIN,
     OP_PAGE_COMMIT,
     OP_QUERY,
     STATE_WAIT,
+    STATE_VALID_APP,
+    format_app_version,
+    make_response,
     pack_socketcan_frame,
     unpack_socketcan_frame,
     parse_response,
@@ -86,6 +91,26 @@ class DropResponseTransport(ModelTransport):
             self.responses.append((response_id, payload))
 
 
+class ApplicationVersionTransport:
+    def __init__(self, version):
+        self.version = version
+        self.responses = deque()
+
+    def send(self, can_id, data):
+        if can_id == CAN_ID_CONTROL and data[0] == OP_APP_VERSION:
+            self.responses.append(
+                (
+                    CAN_ID_RESPONSE,
+                    make_response(OP_APP_VERSION, 0, 0, STATE_VALID_APP, detail=self.version),
+                )
+            )
+
+    def receive(self, _timeout):
+        if self.responses:
+            return self.responses.popleft()
+        return None
+
+
 class ProtocolTests(unittest.TestCase):
     def test_socketcan_frame_round_trip(self):
         packed = pack_socketcan_frame(0x7A1, b"12345678")
@@ -103,6 +128,11 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into("<I", invalid, 0, 0x1000)
         with self.assertRaisesRegex(UpdateError, "stack"):
             validate_image(bytes(invalid))
+
+    def test_query_application_version(self):
+        version = BootloaderClient(ApplicationVersionTransport(0x0102)).query_application_version()
+        self.assertEqual(version, 0x0102)
+        self.assertEqual(format_app_version(version), "1.2")
 
     def test_successful_multi_page_update(self):
         image = make_image()
