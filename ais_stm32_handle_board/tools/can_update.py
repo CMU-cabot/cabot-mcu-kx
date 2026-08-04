@@ -20,11 +20,13 @@ try:
         DATA_WINDOW_FRAMES,
         FLASH_PAGE_SIZE,
         OP_ABORT,
+        OP_APP_VERSION,
         OP_BEGIN_CRC,
         OP_BEGIN_INFO,
         OP_DATA,
         OP_ENTER,
         OP_FINISH,
+        format_app_version,
         OP_PAGE_BEGIN,
         OP_PAGE_COMMIT,
         OP_QUERY,
@@ -49,11 +51,13 @@ except ImportError:
         DATA_WINDOW_FRAMES,
         FLASH_PAGE_SIZE,
         OP_ABORT,
+        OP_APP_VERSION,
         OP_BEGIN_CRC,
         OP_BEGIN_INFO,
         OP_DATA,
         OP_ENTER,
         OP_FINISH,
+        format_app_version,
         OP_PAGE_BEGIN,
         OP_PAGE_COMMIT,
         OP_QUERY,
@@ -165,6 +169,9 @@ class BootloaderClient:
                 time.sleep(0.05)
         raise UpdateError("application reset, but bootloader did not answer QUERY")
 
+    def query_application_version(self):
+        return self.command(OP_APP_VERSION).detail
+
     def _send_page(self, page_index: int, page: bytes):
         page_crc = zlib.crc32(page) & 0xFFFFFFFF
         payload = struct.pack("<BHI", page_index, len(page), page_crc)
@@ -211,13 +218,34 @@ class BootloaderClient:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("image", type=Path, help="relocated raw application .bin")
+    parser.add_argument("image", type=Path, nargs="?", help="relocated raw application .bin")
     parser.add_argument("-i", "--interface", default="can0", help="SocketCAN interface")
     parser.add_argument("--dry-run", action="store_true", help="validate without opening CAN")
+    parser.add_argument(
+        "--query-app-version",
+        action="store_true",
+        help="print the running application version and exit",
+    )
     parser.add_argument("--quiet", action="store_true", help="suppress page progress")
     args = parser.parse_args(argv)
 
     try:
+        if args.query_app_version:
+            if args.image is not None:
+                parser.error("image cannot be used with --query-app-version")
+            if args.dry_run:
+                parser.error("--dry-run cannot be used with --query-app-version")
+            transport = SocketCanTransport(args.interface)
+            try:
+                version = BootloaderClient(transport).query_application_version()
+            finally:
+                transport.close()
+            print(f"application version: {format_app_version(version)} (0x{version:04x})")
+            return 0
+
+        if args.image is None:
+            parser.error("image is required unless --query-app-version is used")
+
         image = args.image.read_bytes()
         image_crc = validate_image(image)
         pages = (len(image) + FLASH_PAGE_SIZE - 1) // FLASH_PAGE_SIZE
