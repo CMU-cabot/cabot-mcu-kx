@@ -47,8 +47,10 @@ Application Flash headroom is 4,060 B. Static RAM grows by 56 B. The remaining
 8,064 B of SRAM is shared runtime space, not measured free heap. The linker still
 reserves 1,024 B for the main stack and 512 B minimum heap; all four task stack
 requests remain 128 words (512 B) each. These build checks do not establish
-runtime heap/stack headroom or physical servo behavior. This refactor has not
-been flashed to the device.
+runtime heap/stack headroom. The firmware at `8e07d60464f8` was subsequently
+flashed to AIS-K25-14: three CAN updates and 34 OFF/ON position trials passed.
+See [hardware validation](tests/hardware/README.md). Runtime memory headroom
+and the historical UART CRC cause remain unverified.
 
 Validation: three native C++ executables passed; Python suite 15 passed and one
 vcan integration skipped; combined STM32 application/bootloader build passed.
