@@ -1,4 +1,8 @@
 #include "firmware_version.h"
+#include <FirmwareService.h>
+#include "can_transport.h"
+#include "handle_protocol.h"
+#include "handle_servo.h"
 #include <STM32FreeRTOS.h>
 #include <mcp2515.h>
 #include <SPI.h>
@@ -42,31 +46,6 @@
 
 #define VIB_DUTY                127 //0~255
 
-//for mass production model
-#define ADDR_TOFCAP     0x080       // 0b0 001 0000 000  ToF/Touch sensor data
-#define ADDR_TACT       0x089       // 0b0 001 0001 001  TACT SW data
-#define ADDR_VIB        0x090       // 0b0 001 0010 000  Vibrator command
-#define ADDR_SERVO_EN   0x098       // 0b0 001 0011 000  Servo enable/disable
-#define ADDR_SERVO_TGT  0x099       // 0b0 001 0011 001  Servor target position
-#define ADDR_SERVO_POS  0x09a       // 0b0 001 0011 010  Servo present position
-#define ADDR_CAP_BASE   0x480       // 0b1 001 0000 000  CAP1203 Debug base address
-#define ADDR_CAP_STAT   0x481       // 0b1 001 0000 001  CAP1203 Debug sensor status
-#define ADDR_CAP_WR1    0x482       // 0b1 001 0000 010  CAP1203 Debug write data 1 (setCalibrationStatusReg)
-#define ADDR_CAP_WR2    0x483       // 0b1 001 0000 011  CAP1203 Debug write data 2 (setNegativeDeltaCountReg)
-#define ADDR_CAP_WR3    0x484       // 0b1 001 0000 100  CAP1203 Debug write data 3 (setSensorInputEnableReg)
-#define ADDR_CAP_WR4    0x485       // 0b1 001 0000 100  CAP1203 Debug write data 4 (setConfigurationReg)
-#define ADDR_CAP_WR5    0x486       // 0b1 001 0000 100  CAP1203 Debug write data 5 (setConfiguration2Reg)
-#define ADDR_BOOT_CTRL  0x7a0       // CAN bootloader control request
-#define ADDR_BOOT_RESP  0x7a1       // CAN bootloader/application response
-
-#define BOOT_ENTER      0x01
-#define BOOT_APP_VERSION 0x05
-#define BOOT_STATUS_OK   0x00
-#define BOOT_STATE_VALID_APP 0x04
-#define BOOT_MAGIC      0x314c4243UL // "CBL1" in little-endian byte order
-static const char handle_app_version[] = HANDLE_FIRMWARE_VERSION;
-static_assert(sizeof(handle_app_version) > 1 && sizeof(handle_app_version) <= 65, "version must be 1-64 ASCII bytes");
-
 #define CAN_FILTER0     0x0090      // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
 #define CAN_FILTER1     0x0480      // 0b1 001 0000 000 filter for ADDR_CAP_WR*
 #define CAN_MASK0       0x07f0      // 0b1 111 1110 000 mask by priority, major, minor (upper 3bit)
@@ -86,15 +65,6 @@ volatile SemaphoreHandle_t semaphoreCanISR;
 volatile SemaphoreHandle_t semaphoreSerialIO;
 volatile SemaphoreHandle_t semaphoreCanIO;
 volatile SemaphoreHandle_t semaphoreCap1203IO;
-
-volatile unsigned char buff_vib[3];
-volatile unsigned char buff_tgt[4];
-volatile unsigned char buff_en[1];
-volatile unsigned char buff_wr1[1];
-volatile unsigned char buff_wr2[1];
-volatile unsigned char buff_wr3[1];
-volatile unsigned char buff_wr4[1];
-volatile unsigned char buff_wr5[1];
 
 byte data_tofcap[4] = {0};
 byte data_tact[1] = {0}; 
@@ -127,12 +97,40 @@ int sw_u_off_cnt = 0;
 int sw_d_on_cnt  = 0;
 int sw_d_off_cnt = 0;
 
-volatile bool onoff_recived = false;
-uint32_t servo_angle = 2047;
-bool servo_enable = false;
-const uint8_t DXL_ID = 1;
-const float DXL_PROTOCOL_VERSION = 2.0;
-using namespace ControlTableItem;
+CanTransport can_transport(mcp2515, semaphoreCanIO);
+HandleServo handle_servo(dxl);
+HandleProtocol handle_protocol(can_transport, handle_servo, cap_sens,
+                               semaphoreCap1203IO, vib0_count, vib1_count, vib2_count);
+
+static bool send_firmware_response(void*, uint32_t id, const uint8_t* data, uint8_t length) {
+  can_frame frame = {};
+  frame.can_id = id;
+  frame.can_dlc = length;
+  memcpy(frame.data, data, length);
+  return can_transport.send(frame);
+}
+
+static bool can_enter_update(void*) { return true; }
+
+static void enter_bootloader(void*) {
+  delay(2); // preserve ACK transmission interval before resetting this board
+  __HAL_RCC_PWR_CLK_ENABLE();
+  HAL_PWR_EnableBkUpAccess();
+  RTC->BKP0R = 0x314c4243UL; // bootloader's CBL1 marker
+  __DSB();
+  NVIC_SystemReset();
+}
+
+static const char app_version[] = HANDLE_FIRMWARE_VERSION;
+static_assert(sizeof(app_version) > 1 && sizeof(app_version) <= 65, "version must be 1-64 bytes");
+FirmwareService firmware_service({CAN_ID_CONTROL, CAN_ID_RESPONSE, app_version, nullptr,
+                                  send_firmware_response, can_enter_update, enter_bootloader});
+
+void process_message(const can_frame& frame) {
+  if (!firmware_service.handle(frame.can_id, frame.can_dlc, frame.data)) {
+    handle_protocol.handle(frame);
+  }
+}
 
 void debug_println(char *str) {
   if (!DEBUG) return;
@@ -158,10 +156,7 @@ int task_read_count = 0;
 
 void task_read(void *pvParameters) {
   while(1) {
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    uint8_t irq = mcp2515.getInterrupts();
-    // readMessage clears each RX flag after copying its frame.
-    xSemaphoreGive(semaphoreCanIO);
+    uint8_t irq = can_transport.interrupts();
 
     struct can_frame recvMsg;
     // read from RXB0 and RXB1 if any available data
@@ -169,17 +164,13 @@ void task_read(void *pvParameters) {
     if (irq & MCP2515::CANINTF_RX0IF) {
       debug_println("task_read0");
       // frame contains received from RXB0 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      bool received = mcp2515.readMessage(MCP2515::RXB0, &recvMsg) == MCP2515::ERROR_OK;
-      xSemaphoreGive(semaphoreCanIO);
+      bool received = can_transport.receive(MCP2515::RXB0, recvMsg);
       if (received) process_message(recvMsg);
     }
     if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      bool received = mcp2515.readMessage(MCP2515::RXB1, &recvMsg) == MCP2515::ERROR_OK;
-      xSemaphoreGive(semaphoreCanIO);
+      bool received = can_transport.receive(MCP2515::RXB1, recvMsg);
       if (received) process_message(recvMsg);
     }
     task_read_count++;
@@ -190,121 +181,6 @@ void task_read(void *pvParameters) {
     }
     // wait for a tick, just in case the interrupt is not fired somehow
     xSemaphoreTake(semaphoreCanISR, 1);
-  }
-}
-
-void process_message(struct can_frame recvMsg) {
-  if(recvMsg.can_id == ADDR_BOOT_CTRL &&
-     recvMsg.can_dlc == 8 &&
-     recvMsg.data[0] == BOOT_ENTER &&
-     recvMsg.data[1] == 'C' && recvMsg.data[2] == 'B' &&
-     recvMsg.data[3] == 'L' && recvMsg.data[4] == '1')
-  {
-    struct can_frame response = {};
-    response.can_id = ADDR_BOOT_RESP;
-    response.can_dlc = 8;
-    response.data[0] = BOOT_ENTER | 0x80;
-    response.data[1] = 0;
-    response.data[2] = 0xff;
-    response.data[3] = 0;
-    response.data[6] = 1;
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    mcp2515.sendMessage(&response);
-    xSemaphoreGive(semaphoreCanIO);
-    delay(2);
-
-    __HAL_RCC_PWR_CLK_ENABLE();
-    HAL_PWR_EnableBkUpAccess();
-    RTC->BKP0R = BOOT_MAGIC;
-    __DSB();
-    NVIC_SystemReset();
-  }
-  else if(recvMsg.can_id == ADDR_BOOT_CTRL &&
-          recvMsg.can_dlc == 8 &&
-          recvMsg.data[0] == BOOT_APP_VERSION)
-  {
-    struct can_frame response = {};
-    response.can_id = ADDR_BOOT_RESP;
-    response.can_dlc = 8;
-    response.data[0] = BOOT_APP_VERSION | 0x80;
-    const uint8_t offset = recvMsg.data[1];
-    const uint8_t length = sizeof(handle_app_version) - 1;
-    response.data[1] = offset < length && offset % 4 == 0 ? BOOT_STATUS_OK : 2;
-    response.data[2] = offset;
-    response.data[3] = length;
-    if (response.data[1] == BOOT_STATUS_OK) {
-      for (uint8_t i = 0; i < 4 && offset + i < length; ++i) {
-        response.data[4 + i] = handle_app_version[offset + i];
-      }
-    }
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    mcp2515.sendMessage(&response);
-    xSemaphoreGive(semaphoreCanIO);
-  }
-  else if(recvMsg.can_id == ADDR_VIB)
-  {
-    buff_vib[0] = recvMsg.data[0];
-    buff_vib[1] = recvMsg.data[1];
-    buff_vib[2] = recvMsg.data[2];
-      
-    vib0_count = (buff_vib[0]!=0) ? buff_vib[0] : vib0_count;
-    vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
-    vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
-  }
-  else if(recvMsg.can_id == ADDR_SERVO_TGT)
-  {
-    if(servo_enable)
-    {
-      buff_tgt[0] = recvMsg.data[0];
-      buff_tgt[1] = recvMsg.data[1];
-      buff_tgt[2] = recvMsg.data[2];
-      buff_tgt[3] = recvMsg.data[3];
-        
-      servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
-    }
-  }
-  else if(recvMsg.can_id == ADDR_SERVO_EN)
-  {
-    if(servo_enable)
-    {
-      buff_en[0] = recvMsg.data[0];
-      onoff_recived = true;
-    }
-  }
-  else if(recvMsg.can_id == ADDR_CAP_WR1)
-  {
-    buff_wr1[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    cap_sens.setCalibrationStatusReg(buff_wr1[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
-  }
-  else if(recvMsg.can_id == ADDR_CAP_WR2)
-  {
-    buff_wr2[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    cap_sens.setNegativeDeltaCountReg(buff_wr2[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
-  }
-  else if(recvMsg.can_id == ADDR_CAP_WR3)
-  {
-    buff_wr3[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    cap_sens.setSensorInputEnableReg(buff_wr3[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
-  }
-  else if(recvMsg.can_id == ADDR_CAP_WR4)
-  {
-    buff_wr4[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    cap_sens.setConfigurationReg(buff_wr4[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
-  }
-  else if(recvMsg.can_id == ADDR_CAP_WR5)
-  {
-    buff_wr5[0] = recvMsg.data[0];
-    xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    cap_sens.setConfiguration2Reg(buff_wr5[0]);
-    xSemaphoreGive(semaphoreCap1203IO);
   }
 }
 
@@ -454,33 +330,22 @@ void task20ms(void *pvParameters)
       task20ms_count = 0;
       debug_println("task20ms");
     }
-    struct can_frame sendMsg;
     uint16_t tof;
     tof = lox.readRangeResult();
-    sendMsg.can_id = ADDR_TOFCAP;
-    sendMsg.can_dlc = 4;
-    sendMsg.data[0] = (tof & 0x00ff) >> 0;
-    sendMsg.data[1] = (tof & 0xff00) >> 8;
     xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    sendMsg.data[2] = cap_sens.getSensorInput1DeltaCountReg();
-    sendMsg.data[3] = cap_sens.getSensorInputStatusReg();
+    uint8_t delta = cap_sens.getSensorInput1DeltaCountReg();
+    uint8_t touch_status = cap_sens.getSensorInputStatusReg();
     cap_sens.setMainControlReg(false, false, false);
     xSemaphoreGive(semaphoreCap1203IO);
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    handle_protocol.send_tof_touch(tof, delta, touch_status);
     delayMicroseconds(500);
 
-    sendMsg.can_id = ADDR_CAP_STAT;
-    sendMsg.can_dlc = 3;
     xSemaphoreTake(semaphoreCap1203IO, portMAX_DELAY);
-    sendMsg.data[0] = cap_sens.getGeneralStatusReg();
-    sendMsg.data[1] = cap_sens.getNoiseFlagStatsReg();
-    sendMsg.data[2] = cap_sens.getCalibrationStatusReg();
+    uint8_t general = cap_sens.getGeneralStatusReg();
+    uint8_t noise = cap_sens.getNoiseFlagStatsReg();
+    uint8_t calibration = cap_sens.getCalibrationStatusReg();
     xSemaphoreGive(semaphoreCap1203IO);
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    handle_protocol.send_touch_status(general, noise, calibration);
     delayMicroseconds(500);
     
     data_tact[0] = sw_right << 0
@@ -489,48 +354,14 @@ void task20ms(void *pvParameters)
                  | sw_down  << 3;
     data_tact[0] = (data_tact[0])&0x0f;
     
-    sendMsg.can_id = ADDR_TACT;
-    sendMsg.can_dlc = 1;
-    sendMsg.data[0] = data_tact[0];
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    mcp2515.sendMessage(&sendMsg);
-    xSemaphoreGive(semaphoreCanIO);
+    handle_protocol.send_buttons(data_tact[0]);
     delayMicroseconds(500);
 
     // debug_println(tof);
 
-    if(servo_enable)
-    {
-      taskENTER_CRITICAL();
-      const bool pending = onoff_recived;
-      const uint8_t command = buff_en[0];
-      onoff_recived = false;
-      taskEXIT_CRITICAL();
-      if(pending)
-      {
-        if(command == 0x00)
-        {
-          dxl.torqueOff(DXL_ID);
-        }
-        if(command == 0x01)
-        {
-          dxl.torqueOn(DXL_ID); 
-        }
-      }
-      
-      dxl.setGoalPosition(DXL_ID, servo_angle);
-      delayMicroseconds(500);
-      uint32_t angle = dxl.getPresentPosition(DXL_ID);
-      
-      sendMsg.can_id = ADDR_SERVO_POS;
-      sendMsg.can_dlc = 4;
-      sendMsg.data[0] = (angle & 0x000000ff) >> 0;
-      sendMsg.data[1] = (angle & 0x0000ff00) >> 8;
-      sendMsg.data[2] = (angle & 0x00ff0000) >> 16;
-      sendMsg.data[3] = (angle & 0xff000000) >> 24;
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.sendMessage(&sendMsg);
-      xSemaphoreGive(semaphoreCanIO);
+    uint32_t angle;
+    if (handle_servo.update(angle)) {
+      handle_protocol.send_position(angle);
     }
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
@@ -575,7 +406,6 @@ void setup()
   vib1_count = 0;
   vib2_count = 0;
   
-  servo_angle = 2047;
 
   while(!lox.begin())
   {
@@ -583,15 +413,7 @@ void setup()
   }
   lox.startRangeContinuous(8);
 
-  dxl.setPortProtocolVersion(DXL_PROTOCOL_VERSION);
-  if(dxl.ping(DXL_ID) == true)
-  {
-    servo_enable = true;
-    dxl.torqueOff(DXL_ID);
-    dxl.setOperatingMode(DXL_ID, OP_POSITION);
-    dxl.torqueOn(DXL_ID);
-    dxl.setGoalPosition(DXL_ID, 2047);
-  }
+  handle_servo.initialize();
 
   cap_sens.begin();
   cap_sens.setSensitivityControlReg(BASE_DEF, DELTA_4X);
@@ -604,7 +426,7 @@ void setup()
 
   mcp2515.setFilterMask(MCP2515::MASK1, false, CAN_MASK1);
   mcp2515.setFilter(MCP2515::RXF2, false, CAN_FILTER1);
-  mcp2515.setFilter(MCP2515::RXF3, false, ADDR_BOOT_CTRL);
+  mcp2515.setFilter(MCP2515::RXF3, false, CAN_ID_CONTROL);
 
   mcp2515.setNormalMode();
   pinMode(SPI_INT, INPUT);

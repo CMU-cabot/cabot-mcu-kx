@@ -6,9 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from firmware_test_support import FIRMWARE_ROOT, read_firmware, run_firmware_test
-
-ROOT = FIRMWARE_ROOT
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class BuildFailureTests(unittest.TestCase):
@@ -31,15 +29,3 @@ class BuildFailureTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((test_directory / 'bootloader-started').exists())
-
-
-class ServoCommandTests(unittest.TestCase):
-    def test_consumes_once_and_preserves_new_command_during_io(self):
-        source = read_firmware()
-        task_start = source.index("void task20ms(")
-        block_start = source.index("    if(servo_enable)", task_start)
-        block_end = source.index("    vTaskDelayUntil", block_start)
-        servo_block = source[block_start:block_end]
-
-        # The fixture checks one-shot consumption, then OFF arriving during ON.
-        run_firmware_test(self, "servo_command.cpp", servo_block)

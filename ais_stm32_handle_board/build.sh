@@ -154,6 +154,7 @@ function compile() {
     args=(
         compile
         -b "$board"
+        --libraries ../libraries
         --build-property "build.flash_offset=$flash_offset"
         --build-property "upload.maximum_size=$flash_limit"
         --build-property "build.flags.optimize=-Os -flto"

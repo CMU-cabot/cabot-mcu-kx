@@ -1,23 +1,28 @@
+# Handle firmware tests
 
-## 最小修正の回帰テストを読む
+## 製品のC++モジュールを直接ビルドする確認
 
-まず次のC++ファイルの `main()` を読むと、操作と期待結果がわかります。
+```sh
+./ais_stm32_handle_board/tests/run_native_tests.sh
+```
 
-- `fixtures/can_receive.cpp`: OFF状態でON要求がRXB0に入っているところへ、
-  目標位置のフレームを到着させます。未読のONが上書きされずに処理されることを確認します。
-- `fixtures/servo_command.cpp`: ON要求1回が複数回実行されないことと、
-  ONのUART処理中に届いたOFF要求が次の周期に処理されることを確認します。
+このスクリプトは次の製品コードをそのままg++でコンパイルし、C++テストとリンクします。
+`.ino`の文字列抽出や、PythonへのC++埋め込みはありません。
 
-`test_can_receive.py` / `test_regressions.py` は `.ino` から実際の処理を取り出します。
-`firmware_test_support.py` はそれを `// FIRMWARE_UNDER_TEST` の位置に挿入し、
-ホストのg++でコンパイルして実行する共通処理です。
-ファームウェアの処理自体をテスト側へコピーして保守する構造ではありません。
+| テスト | 製品コード | 確認内容 |
+|---|---|---|
+| `native/firmware_service_test.cpp` | 共通 `FirmwareService.cpp` | 2種類の基板ID設定、バージョン応答、更新拒否、送信失敗時にリセットしないこと |
+| `native/can_transport_test.cpp` | `can_transport.cpp` | 未読ONを保持した受信、読み取り失敗の通知 |
+| `native/servo_test.cpp` | `handle_servo.cpp` | ONを1回だけ実行、UART処理中のOFF要求を次周期に保持、目標位置の反映 |
 
-CANとUART、RTOSは模擬しています。実機のタイミング、スタック残量、
-サーボの物理動作が正常だと証明するテストではありません。
+CANチップ・Dynamixel・RTOSの代替は `native/stubs/` にあります。
+実機の通信タイミング、CRC、スタック余裕、サーボの機械的な動きは検証しません。
+
+## 既存のホスト更新ツールとビルドスクリプトのテスト
 
 ```sh
 python3 -m unittest discover -s ais_stm32_handle_board/tests -v
 ```
 
-`HANDLE_TEST_SOURCE` に旧版の `.ino` を指定すると、修正前の失敗を確認できます。
+Python製のCAN更新ツール／プロトコルと、コンパイル失敗を返すビルドスクリプトを
+確認します。vcanがない環境ではSocketCAN結合テストはスキップします。
