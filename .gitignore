@@ -1,3 +1,6 @@
 **/build/
 **/__pycache__/
 *.pyc
+
+/ais_stm32_handle_board/firmware_version.h
+/.build/

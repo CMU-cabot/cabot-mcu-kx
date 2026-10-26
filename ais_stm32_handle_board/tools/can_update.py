@@ -20,6 +20,7 @@ try:
         DATA_WINDOW_FRAMES,
         FLASH_PAGE_SIZE,
         OP_ABORT,
+        OP_APP_VERSION,
         OP_BEGIN_CRC,
         OP_BEGIN_INFO,
         OP_DATA,
@@ -49,6 +50,7 @@ except ImportError:
         DATA_WINDOW_FRAMES,
         FLASH_PAGE_SIZE,
         OP_ABORT,
+        OP_APP_VERSION,
         OP_BEGIN_CRC,
         OP_BEGIN_INFO,
         OP_DATA,
@@ -165,6 +167,41 @@ class BootloaderClient:
                 time.sleep(0.05)
         raise UpdateError("application reset, but bootloader did not answer QUERY")
 
+    def query_application_version(self):
+        version = bytearray()
+        total = None
+        while total is None or len(version) < total:
+            offset = len(version)
+            frame = pad_frame(bytes([OP_APP_VERSION, offset]))
+            for _attempt in range(self.retries):
+                self.transport.send(CAN_ID_CONTROL, frame)
+                deadline = time.monotonic() + self.response_timeout
+                chunk = None
+                while time.monotonic() < deadline:
+                    received = self.transport.receive(max(0, deadline - time.monotonic()))
+                    if received is None:
+                        break
+                    can_id, data = received
+                    if can_id != CAN_ID_RESPONSE or len(data) != 8 or data[0] != 0x85:
+                        continue
+                    if data[1] != STATUS_OK:
+                        raise UpdateError(f"application version query failed: status {data[1]}")
+                    if data[2] != offset:
+                        continue  # Ignore a delayed response to an earlier chunk.
+                    if not 1 <= data[3] <= 64 or (total is not None and total != data[3]):
+                        raise UpdateError("invalid or changing application version length")
+                    total = data[3]
+                    chunk = data[4:4 + min(4, total - offset)]
+                    break
+                if chunk is not None:
+                    version.extend(chunk)
+                    break
+            else:
+                raise UpdateError(f"no application version response at offset {offset}")
+        if any(c < 33 or c > 126 for c in version):
+            raise UpdateError("application version is not printable ASCII")
+        return version.decode("ascii")
+
     def _send_page(self, page_index: int, page: bytes):
         page_crc = zlib.crc32(page) & 0xFFFFFFFF
         payload = struct.pack("<BHI", page_index, len(page), page_crc)
@@ -211,13 +248,34 @@ class BootloaderClient:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("image", type=Path, help="relocated raw application .bin")
+    parser.add_argument("image", type=Path, nargs="?", help="relocated raw application .bin")
     parser.add_argument("-i", "--interface", default="can0", help="SocketCAN interface")
     parser.add_argument("--dry-run", action="store_true", help="validate without opening CAN")
+    parser.add_argument(
+        "--query-app-version",
+        action="store_true",
+        help="print the running application version and exit",
+    )
     parser.add_argument("--quiet", action="store_true", help="suppress page progress")
     args = parser.parse_args(argv)
 
     try:
+        if args.query_app_version:
+            if args.image is not None:
+                parser.error("image cannot be used with --query-app-version")
+            if args.dry_run:
+                parser.error("--dry-run cannot be used with --query-app-version")
+            transport = SocketCanTransport(args.interface)
+            try:
+                version = BootloaderClient(transport).query_application_version()
+            finally:
+                transport.close()
+            print(f"application version: {version}")
+            return 0
+
+        if args.image is None:
+            parser.error("image is required unless --query-app-version is used")
+
         image = args.image.read_bytes()
         image_crc = validate_image(image)
         pages = (len(image) + FLASH_PAGE_SIZE - 1) // FLASH_PAGE_SIZE

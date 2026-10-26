@@ -1,3 +1,4 @@
+#include "firmware_version.h"
 #include <STM32FreeRTOS.h>
 #include <mcp2515.h>
 #include <SPI.h>
@@ -59,7 +60,12 @@
 #define ADDR_BOOT_RESP  0x7a1       // CAN bootloader/application response
 
 #define BOOT_ENTER      0x01
+#define BOOT_APP_VERSION 0x05
+#define BOOT_STATUS_OK   0x00
+#define BOOT_STATE_VALID_APP 0x04
 #define BOOT_MAGIC      0x314c4243UL // "CBL1" in little-endian byte order
+static const char handle_app_version[] = HANDLE_FIRMWARE_VERSION;
+static_assert(sizeof(handle_app_version) > 1 && sizeof(handle_app_version) <= 65, "version must be 1-64 ASCII bytes");
 
 #define CAN_FILTER0     0x0090      // 0b0 001 0010 000 filter for ADDR_VIB (major=1, minor=2), ADDR_SERVO_* (major=1, minor=3)
 #define CAN_FILTER1     0x0480      // 0b1 001 0000 000 filter for ADDR_CAP_WR*
@@ -213,6 +219,28 @@ void process_message(struct can_frame recvMsg) {
     RTC->BKP0R = BOOT_MAGIC;
     __DSB();
     NVIC_SystemReset();
+  }
+  else if(recvMsg.can_id == ADDR_BOOT_CTRL &&
+          recvMsg.can_dlc == 8 &&
+          recvMsg.data[0] == BOOT_APP_VERSION)
+  {
+    struct can_frame response = {};
+    response.can_id = ADDR_BOOT_RESP;
+    response.can_dlc = 8;
+    response.data[0] = BOOT_APP_VERSION | 0x80;
+    const uint8_t offset = recvMsg.data[1];
+    const uint8_t length = sizeof(handle_app_version) - 1;
+    response.data[1] = offset < length && offset % 4 == 0 ? BOOT_STATUS_OK : 2;
+    response.data[2] = offset;
+    response.data[3] = length;
+    if (response.data[1] == BOOT_STATUS_OK) {
+      for (uint8_t i = 0; i < 4 && offset + i < length; ++i) {
+        response.data[4 + i] = handle_app_version[offset + i];
+      }
+    }
+    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+    mcp2515.sendMessage(&response);
+    xSemaphoreGive(semaphoreCanIO);
   }
   else if(recvMsg.can_id == ADDR_VIB)
   {

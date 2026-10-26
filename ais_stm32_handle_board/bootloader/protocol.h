@@ -14,6 +14,7 @@
 #define OP_BEGIN_INFO 0x02U
 #define OP_BEGIN_CRC 0x03U
 #define OP_QUERY 0x04U
+#define OP_APP_VERSION 0x05U /* application-only query */
 #define OP_PAGE_BEGIN 0x10U
 #define OP_PAGE_COMMIT 0x11U
 #define OP_DATA 0x12U
