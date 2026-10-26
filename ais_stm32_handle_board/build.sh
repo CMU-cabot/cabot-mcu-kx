@@ -174,6 +174,8 @@ function compile() {
     fi
     args+=(.)
 
+    python3 tools/generate_version.py || return 1
+
     echo "building..."
     printf 'arduino-cli'
     printf ' %q' "${args[@]}"
@@ -204,7 +206,7 @@ case "$target" in
             err "-s cannot be combined with the firmware target"
             exit 2
         fi
-        compile 0
+        compile 0 || exit 1
         bootloader/build.sh
         ;;
 esac

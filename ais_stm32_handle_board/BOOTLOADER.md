@@ -26,11 +26,16 @@ CRC32 representation returned by Python `zlib.crc32`.
 
 ## Build
 
-From the STM32 handle container:
+From the repository root on the host (Git is not installed in the existing image):
 
 ```sh
-./build.sh firmware
+export HANDLE_FIRMWARE_VERSION="$(python3 ais_stm32_handle_board/tools/generate_version.py --print)"
+docker compose run --rm stm32-handle ./build.sh firmware
 ```
+
+Compose forwards the identity into the container. Recompute it after every source
+change. For a release, export a release label instead. Container builds fail if an
+identity is unavailable; they never silently reuse a stale header.
 
 The relevant outputs are:
 
@@ -45,11 +50,13 @@ application build uses `build.flash_offset=0x2000`, `VECT_TAB_OFFSET=0x2000`, `-
 and LTO. `./build.sh -s` remains available for the legacy standalone application and
 is not a CAN update payload.
 
-Validate or install an application with the standard-library-only SocketCAN tool:
+Validate, query the running application version, or install an application with the
+standard-library-only SocketCAN tool:
 
 ```sh
 python3 tools/can_update.py --dry-run \
   build/can-application/ais_stm32_handle_board.ino.bin
+python3 tools/can_update.py --interface can0 --query-app-version
 python3 tools/can_update.py --interface can0 \
   build/can-application/ais_stm32_handle_board.ino.bin
 ```
@@ -79,16 +86,17 @@ All frames are standard 11-bit, DLC 8 frames at 1 Mbps:
 | `0x7A1` | handle to host | ACK, NACK, state, and expected offset |
 | `0x7A2` | host to handle | page data: 16-bit offset plus 6 bytes |
 
-Control opcodes are `ENTER`, `QUERY`, `BEGIN_INFO`, `BEGIN_CRC`, `PAGE_BEGIN`,
-`PAGE_COMMIT`, `FINISH`, and `ABORT`. The host sends data in windows of 16 frames and
-uses `QUERY` to obtain the next expected offset. Lost or out-of-order frames resume at
-that offset. Control commands that can lose their ACK are idempotent.
+Control opcodes are `ENTER`, `QUERY`, `APP_VERSION`, `BEGIN_INFO`, `BEGIN_CRC`,
+`PAGE_BEGIN`, `PAGE_COMMIT`, `FINISH`, and `ABORT`. The host sends data in windows of
+16 frames and uses `QUERY` to obtain the next expected offset. Lost or out-of-order
+frames resume at that offset. Control commands that can lose their ACK are idempotent.
 
 Multi-byte integers are little-endian. The eight control bytes are:
 
 | Opcode | Bytes 1-7 |
 | --- | --- |
 | `0x01 ENTER` | ASCII `CBL1`, then three zero bytes |
+| `0x05 APP_VERSION` | byte offset, six zero bytes |
 | `0x02 BEGIN_INFO` | protocol version, 32-bit image length, two zero bytes |
 | `0x03 BEGIN_CRC` | 32-bit image CRC, then three zero bytes |
 | `0x04 QUERY` | seven zero bytes |
@@ -100,6 +108,38 @@ A response contains opcode ORed with `0x80`, status, page, state, 16-bit expecte
 offset, and 16-bit detail. Status zero is success; the remaining values are defined in
 `bootloader/protocol.h`. A data frame contains a 16-bit page offset followed by six
 bytes, with unused bytes in the final frame set to zero.
+
+The running application answers `APP_VERSION` without rebooting. The old draft's
+numeric version format is replaced by a string query; use the matching host tool.
+The bootloader itself does not implement this opcode.
+
+- Request ID `0x7A0`, DLC 8: `05 offset 00 00 00 00 00 00`.
+- Response ID `0x7A1`, DLC 8: `85 status offset total_length c0 c1 c2 c3`.
+- Offsets are byte offsets 0, 4, 8, ...; each response contains up to four ASCII
+  characters. The final chunk is zero padded, with padding excluded from total length.
+- Strings contain 1-64 printable ASCII characters without spaces. Invalid offsets
+  return status 2. Requests are stateless and can be retried after lost responses.
+- This opcode has its own response layout; the ordinary bootloader response layout
+  and bootloader protocol version remain unchanged.
+
+`./build.sh` generates `firmware_version.h` on each build. The default identity is
+12 hexadecimal Git commit characters, with `-dirty` for a modified working tree.
+For a release, pass an explicit identity, for example:
+
+```sh
+HANDLE_FIRMWARE_VERSION=v1.2.3 ./build.sh firmware
+python3 tools/can_update.py -i can0 --query-app-version
+```
+
+Direct Arduino IDE builds must first run `python3 tools/generate_version.py`.
+Source archives without Git require `HANDLE_FIRMWARE_VERSION`. Do not reuse an old
+generated header. Changing a release label is the builder's responsibility.
+
+The `0x7A0`/`0x7A1`/`0x7A2` IDs were introduced by PR #14 for this handle
+bootloader, not inherited from an existing board assignment. No use of those IDs
+was found in pre-PR MCU sources or the inspected `ais_can` sources. A fleet-wide
+CAN allocation registry has not been verified; this protocol targets one handle
+per bus and does not provide board addressing.
 
 One 2 KiB page is buffered in SRAM. The bootloader validates its CRC before erasing
 and programming the corresponding application page, then verifies flash by reading it
