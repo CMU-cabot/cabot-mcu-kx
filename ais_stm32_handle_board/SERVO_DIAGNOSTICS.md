@@ -54,11 +54,11 @@ counters do not provide a historical trace or prove mechanical movement.
 
 ## Bounded physical-device recovery
 
-After 250 consecutive unhealthy task cycles (~5 seconds), and **only when the
-latest hardware-error read is valid and zero**, try one Dynamixel protocol reboot.
+After 250 consecutive unhealthy task cycles (~5 seconds), try one Dynamixel
+protocol reboot, including when hardware-error status is nonzero or unavailable.
 Keep sensor/CAN tasks alive, give the servo one second without UART access, then
 reapply the latest requested torque state and target. Reboot is not power cycling.
-Nonzero protection/error bits or unknown status inhibit reset escalation.
+Hardware-error status is diagnostic and does not inhibit reset escalation.
 
 If another 250 unhealthy cycles persist, permit one MCU software reset. Save the
 latest mailbox torque request and target in RTC backup register 2 first, so OFF
@@ -71,6 +71,6 @@ Register 0 remains reserved for the CAN bootloader. The saved request is consume
 once; later unrelated resets use the normal startup behavior.
 
 Communication-error recovery continues at low frequency after the reset budget
-is spent. A hardware-protection shutdown is not forcibly cleared or overridden.
+is spent. The configured hardware shutdown protections are not disabled.
 Automatic MCU reset briefly interrupts all handle telemetry; this path requires
 physical validation before claiming reliable field recovery.

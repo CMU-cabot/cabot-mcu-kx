@@ -9,6 +9,7 @@ class MonitorTests(unittest.TestCase):
         code=r'''
 #include "servo_monitor.h"
 #include <cassert>
+#include <initializer_list>
 struct Dxl {
  bool torque=false,fail_on=false,fail_position=false,wrong_readback=false,goal_fail=false;
  int on_calls=0,off_calls=0,err=0,packet=0,reads=0,hw=0; uint32_t position=2048;
@@ -21,13 +22,20 @@ struct Dxl {
 };
 int main(){
  ServoRecovery recovery;
- for(int i=0;i<1000;i++)assert(recovery.update(false,4)==0); // hardware protection
- for(int i=0;i<1000;i++)assert(recovery.update(false,255)==0); // unknown status
  for(int i=0;i<249;i++)assert(recovery.update(false,0)==0);
  assert(recovery.update(false,0)==1);
  for(int i=0;i<249;i++)assert(recovery.update(false,0)==0);
  assert(recovery.update(false,0)==2);
  for(int i=0;i<1000;i++)assert(recovery.update(false,0)==0); // no reset loop
+ // Failure of status readback must not prevent one-shot escalation.
+ for(int status: {4,255}) {
+   ServoRecovery r;
+   for(int i=0;i<249;i++)assert(r.update(false,status)==0);
+   assert(r.update(false,status)==1);
+   for(int i=0;i<249;i++)assert(r.update(false,status)==0);
+   assert(r.update(false,status)==2);
+   for(int i=0;i<1000;i++)assert(r.update(false,status)==0);
+ }
  ServoRecovery interrupted;
  for(int i=0;i<200;i++)assert(interrupted.update(false,0)==0);
  assert(interrupted.update(true,0)==0);

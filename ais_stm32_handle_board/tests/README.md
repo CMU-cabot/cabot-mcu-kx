@@ -86,7 +86,7 @@ and non-halting error recovery behavior.
 - `test_reset_context.py` executes the actual MCU reset function against backup
   register stubs: a newly received OFF overrides an older ON, the target is
   preserved, and invalid targets do not trigger reset. Recovery state tests
-  confirm hardware-error/unknown-status inhibition, one servo then one MCU reset,
+  confirm one servo then one MCU reset even with hardware-error/unknown status,
   and suppression of reset loops. Physical reboot timing remains unverified.
 
 Final extended suite: **22 tests, 21 passed, one vcan integration skip**.

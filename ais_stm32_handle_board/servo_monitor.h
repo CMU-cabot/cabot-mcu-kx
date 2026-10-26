@@ -75,9 +75,9 @@ struct ServoMonitor {
 struct ServoRecovery {
   uint16_t bad_cycles = 0;
   bool servo_reset_used = false, mcu_reset_used = false;
-  uint8_t update(bool healthy, uint8_t hardware_error) {
-    // Unknown status is not permission to reset a physical actuator.
-    if (healthy || hardware_error != 0) { bad_cycles = 0; return 0; }
+  uint8_t update(bool healthy, uint8_t /* hardware_error */) {
+    // Status remains diagnostic; unavailable/error status must not block recovery.
+    if (healthy) { bad_cycles = 0; return 0; }
     if (mcu_reset_used) return 0;
     if (++bad_cycles < 250) return 0;
     bad_cycles = 0;
