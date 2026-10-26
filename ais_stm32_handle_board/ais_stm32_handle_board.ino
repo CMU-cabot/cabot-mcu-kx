@@ -502,17 +502,23 @@ void task20ms(void *pvParameters)
 
     if(servo_enable)
     {
-      if(onoff_recived == true)
+      // Consume before UART I/O so a new CAN command arriving during the
+      // transaction stays pending for the next cycle.
+      taskENTER_CRITICAL();
+      const bool torque_pending = onoff_recived;
+      const uint8_t torque_command = buff_en[0];
+      onoff_recived = false;
+      taskEXIT_CRITICAL();
+      if(torque_pending)
       {
-        if(buff_en[0] == 0x00)
+        if(torque_command == 0x00)
         {
           dxl.torqueOff(DXL_ID);
         }
-        if(buff_en[0] == 0x01)
+        if(torque_command == 0x01)
         {
           dxl.torqueOn(DXL_ID); 
         }
-        onoff_recived == false;
       }
       
       dxl.setGoalPosition(DXL_ID, servo_angle);

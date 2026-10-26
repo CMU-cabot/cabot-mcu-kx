@@ -208,7 +208,9 @@ class BootloaderClient:
         self.command(OP_PAGE_BEGIN, payload)
 
         offset = 0
+        stalled = 0
         while offset < len(page):
+            window_start = offset
             frames = 0
             while offset < len(page) and frames < DATA_WINDOW_FRAMES:
                 chunk = page[offset : offset + DATA_BYTES_PER_FRAME]
@@ -216,6 +218,10 @@ class BootloaderClient:
                     CAN_ID_DATA,
                     struct.pack("<H", offset) + chunk.ljust(DATA_BYTES_PER_FRAME, b"\0"),
                 )
+                # The MCP2515 has only two RX buffers. Allow the 8 MHz MCU
+                # to drain each frame before sending another or a higher-priority
+                # QUERY (0x7A0), which could otherwise overtake data (0x7A2).
+                time.sleep(0.001)
                 offset += len(chunk)
                 frames += 1
             response = self.command(OP_QUERY)
@@ -223,6 +229,14 @@ class BootloaderClient:
                 raise UpdateError("QUERY failed while sending page")
             if response.expected_offset > len(page):
                 raise UpdateError("bootloader reported an invalid page offset")
+            if response.expected_offset < window_start or response.expected_offset > offset:
+                raise UpdateError("bootloader reported an impossible data offset")
+            if response.expected_offset == window_start:
+                stalled += 1
+                if stalled >= self.retries:
+                    raise UpdateError("CAN transfer stalled without receiving data")
+            else:
+                stalled = 0
             offset = response.expected_offset
 
         self.command(OP_PAGE_COMMIT, bytes([page_index]))
