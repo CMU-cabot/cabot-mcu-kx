@@ -1,0 +1,398 @@
+{
+  "device": "AIS-K25-14",
+  "firmware": "8e07d60464f8",
+  "binary_bytes": 51232,
+  "binary_crc32": "5b7c7af6",
+  "binary_sha256": "df09c5704ef42ee3a71d29f56b939f595b184b0b6f2c848bcc66b83789c34cd0",
+  "updater_commit": "07a4067383c9",
+  "updater_sha256": "4e7d979afa13d0c66917cfbe8c6b092b980ae8fe8a82246f513b984a5536904d",
+  "uploads_committed": 3,
+  "tests": {
+    "baseline-old-filter-fixed": {
+      "expected_version": "6fc8c7c0807f",
+      "interface": "can0",
+      "motion_cycles_requested": 0,
+      "trials": [],
+      "passed": true,
+      "version_before": "6fc8c7c0807f",
+      "baseline": {
+        "0x80": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x89": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x9a": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0212
+        },
+        "0x481": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        }
+      },
+      "initial_position": 2046,
+      "version_after": "6fc8c7c0807f"
+    },
+    "motion-30": {
+      "expected_version": "8e07d60464f8",
+      "interface": "can0",
+      "motion_cycles_requested": 30,
+      "trials": [
+        {
+          "trial": 1,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 2,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 3,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 4,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 5,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 6,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 7,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 8,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 9,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 10,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 11,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 12,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 13,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 14,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 15,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 16,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 17,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 18,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 19,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 20,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 21,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 22,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 23,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 24,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 25,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 26,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 27,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 28,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 29,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 30,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "version_before": "8e07d60464f8",
+      "baseline": {
+        "0x80": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x89": {
+          "samples": 149,
+          "hz": 49.67,
+          "max_gap_seconds": 0.0211
+        },
+        "0x9a": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x481": {
+          "samples": 149,
+          "hz": 49.67,
+          "max_gap_seconds": 0.0211
+        }
+      },
+      "initial_position": 2046,
+      "version_after": "8e07d60464f8",
+      "restore_position": 2050
+    },
+    "after-upload-2": {
+      "expected_version": "8e07d60464f8",
+      "interface": "can0",
+      "motion_cycles_requested": 0,
+      "trials": [],
+      "passed": true,
+      "version_before": "8e07d60464f8",
+      "baseline": {
+        "0x80": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x89": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0212
+        },
+        "0x9a": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x481": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        }
+      },
+      "initial_position": 2050,
+      "version_after": "8e07d60464f8"
+    },
+    "after-upload-3": {
+      "expected_version": "8e07d60464f8",
+      "interface": "can0",
+      "motion_cycles_requested": 4,
+      "trials": [
+        {
+          "trial": 1,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 2,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 3,
+          "target": 1900,
+          "last_position": 1903,
+          "samples": 75,
+          "passed": true
+        },
+        {
+          "trial": 4,
+          "target": 2200,
+          "last_position": 2197,
+          "samples": 75,
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "version_before": "8e07d60464f8",
+      "baseline": {
+        "0x80": {
+          "samples": 151,
+          "hz": 50.33,
+          "max_gap_seconds": 0.0211
+        },
+        "0x89": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x9a": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        },
+        "0x481": {
+          "samples": 150,
+          "hz": 50.0,
+          "max_gap_seconds": 0.0211
+        }
+      },
+      "initial_position": 2050,
+      "version_after": "8e07d60464f8",
+      "restore_position": 2050
+    }
+  },
+  "repeat_uploads": [
+    {
+      "attempt": 2,
+      "seconds": 14.156,
+      "returncode": 0,
+      "stdout": "image: /tmp/handle-modular-8e07d60/ais_stm32_handle_board.ino.bin\nsize: 51232 / 55296 bytes\npages: 26\ncrc32: 0x5b7c7af6\nupdate committed; handle is restarting\n",
+      "stderr": ""
+    },
+    {
+      "attempt": 3,
+      "seconds": 14.167,
+      "returncode": 0,
+      "stdout": "image: /tmp/handle-modular-8e07d60/ais_stm32_handle_board.ino.bin\nsize: 51232 / 55296 bytes\npages: 26\ncrc32: 0x5b7c7af6\nupdate committed; handle is restarting\n",
+      "stderr": ""
+    }
+  ]
+}

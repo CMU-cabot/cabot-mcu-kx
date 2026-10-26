@@ -48,6 +48,7 @@ services:
     extends: stm32
     volumes:
       - ./ais_stm32_handle_board:/mnt/ais_stm32_handle_board
+      - ./libraries:/mnt/libraries:ro
     environment:
       - HANDLE_FIRMWARE_VERSION
     working_dir: /mnt/ais_stm32_handle_board
