@@ -1,4 +1,6 @@
 #include "FirmwareService.h"
+#include "test_cases.h"
+#include <string>
 #include <cassert>
 #include <cstring>
 
@@ -23,7 +25,7 @@ void enter(void* context) {
     board.entered = true;
 }
 
-int main() {
+void board_ids_version_chunks_and_boot_policy() {
     // Same service supports two boards with distinct IDs and versions.
     for (unsigned index = 0; index < 2; ++index) {
         Board board;
@@ -59,4 +61,49 @@ int main() {
         service.handle(request_id, 8, boot);
         assert(board.entered);
     }
+}
+
+void malformed_requests_have_no_side_effects() {
+    Board board;
+    FirmwareService service({0x7a0, 0x7a1, "v1", &board, send, permitted, enter});
+    uint8_t request[8] = {OP_ENTER, 'X', 'B', 'L', '1'};
+    assert(service.handle(0x7a0, 8, request));
+    request[0] = 0xff;
+    assert(service.handle(0x7a0, 8, request));
+    assert(service.handle(0x7a0, 8, nullptr));
+    for (uint8_t length = 0; length < 8; ++length) {
+        assert(service.handle(0x7a0, length, request));
+    }
+    assert(board.sends == 0 && !board.entered);
+}
+
+void version_boundaries_and_partial_chunk_padding() {
+    for (unsigned size : {1u, 5u, 64u}) {
+        Board board;
+        std::string version(size, 'a');
+        FirmwareService service({0x7a0, 0x7a1, version.c_str(), &board, send, permitted, enter});
+        const uint8_t offset = ((size - 1) / 4) * 4;
+        uint8_t request[8] = {OP_APP_VERSION, offset};
+        service.handle(0x7a0, 8, request);
+        assert(board.response[1] == STATUS_OK && board.response[3] == size);
+        for (unsigned i = 0; i < 4; ++i) {
+            assert(board.response[4 + i] == (offset + i < size ? 'a' : 0));
+        }
+    }
+    std::string too_long(65, 'a');
+    const char* invalid_versions[] = {nullptr, "", "has space", "bad\n", too_long.c_str()};
+    for (const char* version : invalid_versions) {
+        Board board;
+        FirmwareService service({0x7a0, 0x7a1, version, &board, send, permitted, enter});
+        uint8_t request[8] = {OP_APP_VERSION};
+        service.handle(0x7a0, 8, request);
+        assert(board.response[1] == STATUS_BAD_ARGUMENT && board.response[3] == 0);
+        for (unsigned i = 4; i < 8; ++i) assert(board.response[i] == 0);
+    }
+}
+
+int main() {
+    RUN_TEST(board_ids_version_chunks_and_boot_policy);
+    RUN_TEST(malformed_requests_have_no_side_effects);
+    RUN_TEST(version_boundaries_and_partial_chunk_padding);
 }

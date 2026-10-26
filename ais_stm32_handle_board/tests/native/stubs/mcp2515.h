@@ -8,7 +8,9 @@ public:
     enum { CANINTF_RX0IF = 1, CANINTF_RX1IF = 2 };
     bool occupied[2] = {true, false};
     can_frame frames[2] = {{0x98, 1, {1}}, {}};
-    bool target_arrived = false, fail_read = false;
+    bool target_arrived = false, fail_read = false, fail_send = false;
+    can_frame last_sent = {};
+    int send_calls = 0;
     void deliver_target() {
         if (target_arrived) return;
         target_arrived = true;
@@ -25,5 +27,8 @@ public:
         occupied[index] = false;
         return ERROR_OK;
     }
-    int sendMessage(const can_frame*) { return ERROR_OK; }
+    int sendMessage(const can_frame* frame) {
+        ++send_calls; last_sent = *frame;
+        return fail_send ? ERROR_FAIL : ERROR_OK;
+    }
 };
