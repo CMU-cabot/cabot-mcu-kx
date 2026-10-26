@@ -49,3 +49,46 @@ in firmware, but these tests do **not** reproduce or prove the entire physical
 Issue #53 failure. The issue must remain open pending command/feedback and
 physical indicator validation on the affected device. Do not relax the host
 tracking timeout or claim the hardware fault is resolved from these tests.
+
+## Additional PR #17 regressions
+
+- `test_can_receive.py` compiles the actual receive task with a two-buffer model.
+  ON is pending while a target frame arrives during the read. At `16191d6`,
+  clearing interrupt flags first lets the target overwrite ON, and the test fails
+  with `OFF->ON followed by target lost ON; no motion`. The fixed task never
+  globally clears pending RX flags, checks read results and drains both buffers;
+  the same test passes. The model exercises a specific race, not proof of the
+  historical device's firmware/timing.
+- The actual servo-task harness injects one failed ON write after OFF while
+  position reads continue. At `16191d6` the test fails with `OFF->ON UART failure
+  never retried; position fixed`. The new monitor verifies torque and retries,
+  and the same harness passes. Repeated-command and concurrent-OFF checks remain.
+- `test_servo_monitor.py` covers bounded initial retries followed by 1 Hz recovery,
+  new OFF superseding an ON retry, ACK/readback mismatch, invalid position reads,
+  goal-write failures, hardware alerts, error saturation and diagnostic budgets.
+  In 500 cycles, changing target counts produce at most 11 diagnostic frames;
+  continuously changing error state produces at most 100. Normal polling performs
+  20 extra UART reads in those 500 cycles.
+
+To reproduce pre-fix failures without changing the checkout:
+
+```sh
+git show 16191d6:ais_stm32_handle_board/ais_stm32_handle_board.ino > /tmp/handle-before-fix.ino
+HANDLE_TEST_SOURCE=/tmp/handle-before-fix.ino python3 -m unittest discover -s ais_stm32_handle_board/tests -p test_can_receive.py -v
+HANDLE_TEST_SOURCE=/tmp/handle-before-fix.ino python3 -m unittest discover -s ais_stm32_handle_board/tests -p test_regressions.py -v
+```
+
+The two commands above are expected to fail. Omit HANDLE_TEST_SOURCE to test the
+fixed firmware. These changes have not been flashed or mechanically validated.
+See [SERVO_DIAGNOSTICS.md](../SERVO_DIAGNOSTICS.md) for the low-rate wire format
+and non-halting error recovery behavior.
+
+- `test_reset_context.py` executes the actual MCU reset function against backup
+  register stubs: a newly received OFF overrides an older ON, the target is
+  preserved, and invalid targets do not trigger reset. Recovery state tests
+  confirm hardware-error/unknown-status inhibition, one servo then one MCU reset,
+  and suppression of reset loops. Physical reboot timing remains unverified.
+
+Final extended suite: **22 tests, 21 passed, one vcan integration skip**.
+STM32 build: application **52,132 / 55,296 bytes**, bootloader **3,276 / 8,192 bytes**.
+No firmware containing these added servo/reset changes has been installed on a device.
