@@ -104,7 +104,3 @@ def make_response(operation: int, status: int, page: int, state: int,
         expected_offset,
         detail,
     )
-
-
-def format_app_version(version: int) -> str:
-    return f"{(version >> 8) & 0xFF}.{version & 0xFF}"

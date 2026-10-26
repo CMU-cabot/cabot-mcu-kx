@@ -48,6 +48,8 @@ services:
     extends: stm32
     volumes:
       - ./ais_stm32_handle_board:/mnt/ais_stm32_handle_board
+    environment:
+      - HANDLE_FIRMWARE_VERSION
     working_dir: /mnt/ais_stm32_handle_board
 
   stm32-power:

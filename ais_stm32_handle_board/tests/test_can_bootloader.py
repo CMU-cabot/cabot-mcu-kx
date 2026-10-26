@@ -24,7 +24,6 @@ from tools.can_bootloader_protocol import (  # noqa: E402
     OP_QUERY,
     STATE_WAIT,
     STATE_VALID_APP,
-    format_app_version,
     make_response,
     pack_socketcan_frame,
     unpack_socketcan_frame,
@@ -101,7 +100,7 @@ class ApplicationVersionTransport:
             self.responses.append(
                 (
                     CAN_ID_RESPONSE,
-                    make_response(OP_APP_VERSION, 0, 0, STATE_VALID_APP, detail=self.version),
+                    bytes([0x85, 0, data[1], len(self.version)]) + self.version[data[1]:data[1]+4].ljust(4, b"\0"),
                 )
             )
 
@@ -130,9 +129,46 @@ class ProtocolTests(unittest.TestCase):
             validate_image(bytes(invalid))
 
     def test_query_application_version(self):
-        version = BootloaderClient(ApplicationVersionTransport(0x0102)).query_application_version()
-        self.assertEqual(version, 0x0102)
-        self.assertEqual(format_app_version(version), "1.2")
+        for text in ("e8b5ccb12345", "v1.2.3-rc.1", "x", "a" * 64):
+            with self.subTest(text=text):
+                version = BootloaderClient(ApplicationVersionTransport(text.encode())).query_application_version()
+                self.assertEqual(version, text)
+
+    def test_version_rejects_bad_lengths_and_non_ascii(self):
+        for text in (b"", b"x" * 65, b"ab\xffd"):
+            with self.assertRaises(UpdateError):
+                BootloaderClient(ApplicationVersionTransport(text)).query_application_version()
+
+    def test_version_retries_lost_chunk_and_ignores_stale_reply(self):
+        class LossyVersionTransport(ApplicationVersionTransport):
+            dropped = False
+            requests = []
+
+            def send(self, can_id, data):
+                self.requests.append(data[1])
+                if data[1] == 4 and not self.dropped:
+                    self.dropped = True
+                    self.responses.append((CAN_ID_RESPONSE, bytes([0x85, 0, 0, len(self.version)]) + self.version[:4]))
+                    return
+                super().send(can_id, data)
+
+        transport = LossyVersionTransport(b"v1.2.3-rc.1")
+        self.assertEqual(BootloaderClient(transport).query_application_version(), "v1.2.3-rc.1")
+        self.assertEqual(transport.requests, [0, 4, 4, 8])
+
+    def test_version_rejects_length_change(self):
+        class ChangingVersionTransport(ApplicationVersionTransport):
+            def send(self, can_id, data):
+                if data[1] == 4:
+                    self.version += b"x"
+                super().send(can_id, data)
+        with self.assertRaisesRegex(UpdateError, "changing"):
+            BootloaderClient(ChangingVersionTransport(b"12345678")).query_application_version()
+
+    def test_version_missing_response_is_bounded(self):
+        client = BootloaderClient(ModelTransport(BootloaderModel()), retries=2)
+        with self.assertRaises(UpdateError):
+            client.query_application_version()
 
     def test_successful_multi_page_update(self):
         image = make_image()
