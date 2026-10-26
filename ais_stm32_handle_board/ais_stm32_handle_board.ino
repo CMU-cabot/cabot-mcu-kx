@@ -160,8 +160,7 @@ void task_read(void *pvParameters) {
   while(1) {
     xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
     uint8_t irq = mcp2515.getInterrupts();
-    // ensure that the interrupt is cleared and will get next mcpISR call
-    mcp2515.clearInterrupts();
+    // readMessage clears each RX flag after copying its frame.
     xSemaphoreGive(semaphoreCanIO);
 
     struct can_frame recvMsg;
@@ -171,17 +170,17 @@ void task_read(void *pvParameters) {
       debug_println("task_read0");
       // frame contains received from RXB0 message
       xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
+      bool received = mcp2515.readMessage(MCP2515::RXB0, &recvMsg) == MCP2515::ERROR_OK;
       xSemaphoreGive(semaphoreCanIO);
-      process_message(recvMsg);
+      if (received) process_message(recvMsg);
     }
     if (irq & MCP2515::CANINTF_RX1IF) {
       debug_println("task_read1");
       // frame contains received from RXB1 message
       xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
+      bool received = mcp2515.readMessage(MCP2515::RXB1, &recvMsg) == MCP2515::ERROR_OK;
       xSemaphoreGive(semaphoreCanIO);
-      process_message(recvMsg);
+      if (received) process_message(recvMsg);
     }
     task_read_count++;
     if (task_read_count > 1000)
