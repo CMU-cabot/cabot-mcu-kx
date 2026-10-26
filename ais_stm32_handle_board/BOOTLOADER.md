@@ -170,3 +170,5 @@ python3 tools/can_bootloader_sim.py --interface vcan0
 No physical board is available for this work. MCP2515 electrical timing, STM32 flash
 programming, reset persistence, and application handoff still require later on-device
 verification. Initial device programming is intentionally outside this implementation.
+
+See [tests/README.md](tests/README.md) for regression evidence and physical validation limits.

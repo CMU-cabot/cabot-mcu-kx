@@ -1,4 +1,5 @@
 #include "firmware_version.h"
+#include "servo_monitor.h"
 #include <STM32FreeRTOS.h>
 #include <mcp2515.h>
 #include <SPI.h>
@@ -127,12 +128,38 @@ int sw_u_off_cnt = 0;
 int sw_d_on_cnt  = 0;
 int sw_d_off_cnt = 0;
 
+ServoMonitor servo_monitor;
+ServoRecovery servo_recovery;
+constexpr uint32_t SERVO_RESET_BUDGET = 0x53525631;
+constexpr uint32_t SERVO_RESUME_CONTEXT = 0x53520000;
+
+volatile uint8_t servo_torque_received = 0, servo_target_received = 0;
 volatile bool onoff_recived = false;
-uint32_t servo_angle = 2047;
+volatile uint32_t servo_angle = 2047;
 bool servo_enable = false;
 const uint8_t DXL_ID = 1;
 const float DXL_PROTOCOL_VERSION = 2.0;
 using namespace ControlTableItem;
+void enable_recovery_backup() {
+  __HAL_RCC_PWR_CLK_ENABLE();
+  HAL_PWR_EnableBkUpAccess();
+}
+
+void reset_handle_preserving_request() {
+  taskENTER_CRITICAL();
+  // Select the latest CAN mailbox, including a command received during UART I/O.
+  bool requested = onoff_recived ? buff_en[0] != 0 : servo_monitor.desired;
+  uint32_t target = servo_angle;
+  if (target > 4095) { taskEXIT_CRITICAL(); return; }
+  enable_recovery_backup();
+  RTC->BKP1R = SERVO_RESET_BUDGET; // survives software reset; prevents reboot loops
+  RTC->BKP2R = SERVO_RESUME_CONTEXT | (requested ? 0x1000 : 0) | target;
+  __DSB();
+  NVIC_SystemReset();
+  taskEXIT_CRITICAL();
+}
+
+
 
 void debug_println(char *str) {
   if (!DEBUG) return;
@@ -158,30 +185,20 @@ int task_read_count = 0;
 
 void task_read(void *pvParameters) {
   while(1) {
-    xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-    uint8_t irq = mcp2515.getInterrupts();
-    // ensure that the interrupt is cleared and will get next mcpISR call
-    mcp2515.clearInterrupts();
-    xSemaphoreGive(semaphoreCanIO);
-
-    struct can_frame recvMsg;
-    // read from RXB0 and RXB1 if any available data
-    // then wait for the next interrupt
-    if (irq & MCP2515::CANINTF_RX0IF) {
-      debug_println("task_read0");
-      // frame contains received from RXB0 message
+    // readMessage releases only the consumed RX buffer after copying it.
+    // Never clear CANINTF before reading: that makes unread buffers writable.
+    for (uint8_t round = 0; round < 4; ++round) {
+      struct can_frame frames[2];
+      uint8_t count = 0;
       xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.readMessage(MCP2515::RXB0, &recvMsg);
+      uint8_t irq = mcp2515.getInterrupts();
+      if ((irq & MCP2515::CANINTF_RX0IF) &&
+          mcp2515.readMessage(MCP2515::RXB0, &frames[count]) == MCP2515::ERROR_OK) ++count;
+      if ((irq & MCP2515::CANINTF_RX1IF) &&
+          mcp2515.readMessage(MCP2515::RXB1, &frames[count]) == MCP2515::ERROR_OK) ++count;
       xSemaphoreGive(semaphoreCanIO);
-      process_message(recvMsg);
-    }
-    if (irq & MCP2515::CANINTF_RX1IF) {
-      debug_println("task_read1");
-      // frame contains received from RXB1 message
-      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
-      mcp2515.readMessage(MCP2515::RXB1, &recvMsg);
-      xSemaphoreGive(semaphoreCanIO);
-      process_message(recvMsg);
+      for (uint8_t i = 0; i < count; ++i) process_message(frames[i]);
+      if (count == 0) break;
     }
     task_read_count++;
     if (task_read_count > 1000)
@@ -252,9 +269,9 @@ void process_message(struct can_frame recvMsg) {
     vib1_count = (buff_vib[1]!=0) ? buff_vib[1] : vib1_count;
     vib2_count = (buff_vib[2]!=0) ? buff_vib[2] : vib2_count;
   }
-  else if(recvMsg.can_id == ADDR_SERVO_TGT)
+  else if(recvMsg.can_id == ADDR_SERVO_TGT && recvMsg.can_dlc == 4)
   {
-    if(servo_enable)
+    ++servo_target_received;
     {
       buff_tgt[0] = recvMsg.data[0];
       buff_tgt[1] = recvMsg.data[1];
@@ -264,9 +281,9 @@ void process_message(struct can_frame recvMsg) {
       servo_angle = ((uint32_t)buff_tgt[3]) << 24 | ((uint32_t)buff_tgt[2]) << 16 | ((uint16_t)buff_tgt[1]) << 8 | ((uint16_t)buff_tgt[0]) << 0;
     }
   }
-  else if(recvMsg.can_id == ADDR_SERVO_EN)
+  else if(recvMsg.can_id == ADDR_SERVO_EN && recvMsg.can_dlc == 1 && recvMsg.data[0] <= 1)
   {
-    if(servo_enable)
+    ++servo_torque_received;
     {
       buff_en[0] = recvMsg.data[0];
       onoff_recived = true;
@@ -502,23 +519,18 @@ void task20ms(void *pvParameters)
 
     if(servo_enable)
     {
-      if(onoff_recived == true)
-      {
-        if(buff_en[0] == 0x00)
-        {
-          dxl.torqueOff(DXL_ID);
-        }
-        if(buff_en[0] == 0x01)
-        {
-          dxl.torqueOn(DXL_ID); 
-        }
-        onoff_recived == false;
-      }
-      
-      dxl.setGoalPosition(DXL_ID, servo_angle);
-      delayMicroseconds(500);
-      uint32_t angle = dxl.getPresentPosition(DXL_ID);
-      
+      // Consume before UART I/O so a new CAN command arriving during the
+      // transaction stays pending for the next cycle.
+      taskENTER_CRITICAL();
+      const bool torque_pending = onoff_recived;
+      const uint8_t torque_command = buff_en[0];
+      onoff_recived = false;
+      taskEXIT_CRITICAL();
+      if (torque_pending) servo_monitor.command(torque_command != 0);
+      uint32_t angle = 0;
+      bool valid_position = servo_monitor.step(dxl, DXL_ID, servo_angle,
+                                               TORQUE_ENABLE, HARDWARE_ERROR_STATUS, angle);
+      if (valid_position) {
       sendMsg.can_id = ADDR_SERVO_POS;
       sendMsg.can_dlc = 4;
       sendMsg.data[0] = (angle & 0x000000ff) >> 0;
@@ -527,6 +539,32 @@ void task20ms(void *pvParameters)
       sendMsg.data[3] = (angle & 0xff000000) >> 24;
       xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
       mcp2515.sendMessage(&sendMsg);
+      xSemaphoreGive(semaphoreCanIO);
+      }
+    } else {
+      ++servo_monitor.ticks;
+      // A failed startup ping must not disable servo service until reboot.
+      if (servo_monitor.ticks % 50 == 0) {
+        servo_enable = servo_monitor.check(dxl, dxl.ping(DXL_ID), 6);
+      }
+    }
+    uint8_t recovery = servo_recovery.update(servo_monitor.cycle_ok, servo_monitor.hardware_error);
+    if (recovery == 1) {
+      // Protocol reboot, not a power cycle. Keep CAN/sensor tasks alive.
+      servo_monitor.check(dxl, dxl.reboot(DXL_ID), 7);
+      servo_monitor.quiet_until = servo_monitor.ticks + 50;
+      servo_monitor.command(servo_monitor.desired);
+    } else if (recovery == 2) {
+      reset_handle_preserving_request();
+    }
+    servo_monitor.rx_torque = servo_torque_received;
+    servo_monitor.rx_target = servo_target_received;
+    struct can_frame diagnostic = {};
+    diagnostic.can_id = ADDR_BOOT_RESP;
+    diagnostic.can_dlc = 8;
+    if (servo_monitor.report(diagnostic.data)) {
+      xSemaphoreTake(semaphoreCanIO, portMAX_DELAY);
+      mcp2515.sendMessage(&diagnostic);
       xSemaphoreGive(semaphoreCanIO);
     }
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -572,7 +610,15 @@ void setup()
   vib1_count = 0;
   vib2_count = 0;
   
-  servo_angle = 2047;
+  enable_recovery_backup();
+  uint32_t resume = RTC->BKP2R;
+  bool recovery_boot = (resume & 0xffffe000UL) == SERVO_RESUME_CONTEXT;
+  servo_recovery.mcu_reset_used = RTC->BKP1R == SERVO_RESET_BUDGET;
+  servo_recovery.servo_reset_used = servo_recovery.mcu_reset_used;
+  RTC->BKP2R = 0; // do not replay stale targets on a later unrelated reset
+  servo_angle = recovery_boot ? resume & 0xfff : 2047;
+  bool startup_on = recovery_boot ? (resume & 0x1000) != 0 : true;
+  if (recovery_boot) servo_monitor.command(startup_on);
 
   while(!lox.begin())
   {
@@ -584,10 +630,16 @@ void setup()
   if(dxl.ping(DXL_ID) == true)
   {
     servo_enable = true;
-    dxl.torqueOff(DXL_ID);
-    dxl.setOperatingMode(DXL_ID, OP_POSITION);
-    dxl.torqueOn(DXL_ID);
-    dxl.setGoalPosition(DXL_ID, 2047);
+    if (!recovery_boot) {
+      servo_monitor.check(dxl, dxl.torqueOff(DXL_ID), 1);
+      servo_monitor.check(dxl, dxl.setOperatingMode(DXL_ID, OP_POSITION), 6);
+    }
+    servo_monitor.command(startup_on); // verified, bounded startup enable in task20ms
+  }
+
+  if (!servo_enable) {
+    if (!recovery_boot) servo_monitor.desired = false;
+    servo_monitor.check(dxl, false, 6);
   }
 
   cap_sens.begin();
